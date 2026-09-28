@@ -129,7 +129,13 @@
       "Bash(sed -i '' 's|sys.path.insert\\(0, str\\(ROOT / \"scripts\"\\)\\)\\\\nfrom pipeline|X|' scripts/eval_identity_only.py)",
       "Bash(.venv/bin/python scripts/eval_identity_only.py data/public/youtube_amateur/otJAg5p7jVw.mp4 outputs/v2/pose/youtube/otJAg5p7jVw_pose.json data/public/youtube_amateur/labels_identity_otJAg5p7jVw.json --out outputs/v2/identity_eval_otJ.json)",
       "Bash(git -c 'user.name=Long Tennis' -c user.email=hassaniftikhar62@gmail.com commit -q -m 'Flutter client v1 \\(Android + iOS project\\): server settings, sessions, record/import, resumable upload, court setup on median background, progress, report \\(summary, landing map, shots with server video playback\\) *)",
-      "Bash(.venv/bin/python eval/run.py identity events)"
+      "Bash(.venv/bin/python eval/run.py identity events)",
+      "Bash(POSE_THREADS=6 .venv/bin/python scripts/pose_tracknet.py)",
+      "Bash(pkill -f \"uvicorn server.app:app\")",
+      "Bash(curl -s -H \"Authorization: Bearer dev-token\" http://127.0.0.1:8770/api/v1/sessions)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(len\\(d\\), d[0]['id'] if d else None\\)\")",
+      "Bash(curl -s -H 'Authorization: Bearer dev-token' http://127.0.0.1:8770/api/v1/sessions/f43ac099/report)",
+      "Bash(git -c 'user.name=Long Tennis' -c user.email=hassaniftikhar62@gmail.com commit -q -m 'Shot review: app editor \\(watch, change player/stroke, delete, add missed shot\\) + server corrections API that recomputes the report and stores review labels; TrackNet court calibration + pose for hit-model training *)"
     ]
   }
 }

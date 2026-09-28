@@ -69,3 +69,17 @@ def test_calibration_rejects_bad_markers(client):
     sid = client.post("/api/v1/sessions", json={}, headers=H).json()["id"]
     r = client.post(f"/api/v1/sessions/{sid}/calibration", json={"markers": {"x": [0, 0]}}, headers=H)
     assert r.status_code == 409  # no video yet
+
+
+def test_corrections_recompute_summary(client, tmp_path=None):
+    from server.app import apply_corrections
+    rep = {"fps": 30.0, "players": {"A": {"name": "Red"}, "B": {"name": "Grey"}},
+           "shots": [{"hitFrame": 10, "timeS": 0.33, "playerId": "A", "stroke": "forehand", "landing": {"status": "in", "region": "deep_left"}},
+                     {"hitFrame": 50, "timeS": 1.67, "playerId": "B", "stroke": "backhand", "landing": {"status": "not_observed"}},
+                     {"hitFrame": 90, "timeS": 3.0, "playerId": "A", "stroke": "serve", "landing": {"status": "not_observed"}}]}
+    out = apply_corrections(rep, {"shots": [{"hitFrame": 50, "action": "edit", "stroke": "forehand"},
+                                            {"hitFrame": 90, "action": "delete"}],
+                                  "added": [{"timeS": 4.0, "playerId": "B", "stroke": "volley"}]})
+    assert [s["hitFrame"] for s in out["shots"]] == [10, 50, 120]
+    assert out["players"]["A"]["shots"] == 1 and out["players"]["B"]["strokes"]["forehand"] == 1
+    assert out["players"]["B"]["strokes"]["volley"] == 1

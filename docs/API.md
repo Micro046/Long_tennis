@@ -25,6 +25,7 @@ create -> upload video (resumable) -> frame -> calibrate (user markers) -> analy
 | POST | `/sessions/{id}/analyze` | – | `Session` (`status: queued`) |
 | GET | `/sessions/{id}/report` | – | report JSON (see `docs/REPORT_SCHEMA.md`) |
 | GET | `/sessions/{id}/video` | HTTP Range supported | the uploaded video (for playback) |
+| PUT | `/sessions/{id}/corrections` | `{shots: [{hitFrame, action: confirm\|delete\|edit, playerId?, stroke?}], added: [{timeS, playerId, stroke}]}` | corrected report; also saved as review labels |
 
 Marker names: `far_left_singles, far_right_singles, near_service_left, near_service_right` (default set)
 or any 4+ keypoints of the court model (`near_left_singles`, `near_right_singles`, …).

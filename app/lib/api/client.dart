@@ -105,6 +105,13 @@ class ApiClient {
       (await _dio.get(_u('/sessions/$id/report'), options: _auth)).data as Map<String, dynamic>;
 
   String videoUrl(String id) => _u('/sessions/$id/video');
+
+  Future<Map<String, dynamic>> corrections(String id) async =>
+      (await _dio.get(_u('/sessions/$id/corrections'), options: _auth)).data as Map<String, dynamic>;
+
+  /// Replaces the stored corrections; returns the corrected report.
+  Future<Map<String, dynamic>> saveCorrections(String id, Map<String, dynamic> body) async =>
+      (await _dio.put(_u('/sessions/$id/corrections'), data: body, options: _auth)).data as Map<String, dynamic>;
 }
 
 class CalibrationResult {

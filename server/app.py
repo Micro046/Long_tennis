@@ -261,12 +261,72 @@ def compact_report(r: dict) -> dict:
     return {k: v for k, v in r.items() if k not in ("perFrameIdentity", "ballPath")}
 
 
-@app.get("/api/v1/sessions/{sid}/report", dependencies=[Depends(auth)])
-def report(sid: str):
-    p = sdir(sid) / "report.json"
+STROKES = ("serve", "forehand", "backhand", "volley", "overhead", "unknown")
+
+
+def apply_corrections(rep: dict, corr: dict) -> dict:
+    """Shots reviewed in the app: delete / change player or stroke / add missed shots. The summary is
+    recomputed so every number the player sees reflects the corrections."""
+    from pipeline import session as S
+    by_frame = {c["hitFrame"]: c for c in corr.get("shots", [])}
+    shots = []
+    for s in rep["shots"]:
+        c = by_frame.get(s["hitFrame"])
+        if c and c.get("action") == "delete":
+            continue
+        s = dict(s)
+        if c:
+            if c.get("playerId") in ("A", "B"):
+                s["playerId"] = c["playerId"]
+            if c.get("stroke") in STROKES:
+                s["stroke"] = c["stroke"]
+            s["reviewed"] = True
+        shots.append(s)
+    fps = rep.get("fps", 30.0)
+    for a in corr.get("added", []):
+        shots.append({"hitFrame": int(round(a["timeS"] * fps)), "timeS": a["timeS"], "playerId": a.get("playerId", "unknown"),
+                      "side": None, "stroke": a.get("stroke", "unknown"), "landing": {"status": "not_observed"},
+                      "reviewed": True, "addedByUser": True})
+    shots.sort(key=lambda s: s["hitFrame"])
+    names = {k: v["name"] for k, v in rep["players"].items()}
+    return {**rep, "shots": shots, "players": S.summarize(shots, names),
+            "review": {"corrections": len(by_frame), "added": len(corr.get("added", []))}}
+
+
+def load_report(d: Path) -> dict:
+    p = d / "report.json"
     if not p.exists():
         raise HTTPException(404, "report not ready")
-    return compact_report(json.loads(p.read_text()))
+    rep = json.loads(p.read_text())
+    c = d / "corrections.json"
+    return apply_corrections(rep, json.loads(c.read_text())) if c.exists() else rep
+
+
+@app.get("/api/v1/sessions/{sid}/report", dependencies=[Depends(auth)])
+def report(sid: str):
+    return compact_report(load_report(sdir(sid)))
+
+
+@app.get("/api/v1/sessions/{sid}/corrections", dependencies=[Depends(auth)])
+def get_corrections(sid: str):
+    c = sdir(sid) / "corrections.json"
+    return json.loads(c.read_text()) if c.exists() else {"shots": [], "added": []}
+
+
+@app.put("/api/v1/sessions/{sid}/corrections", dependencies=[Depends(auth)])
+def put_corrections(sid: str, body: dict):
+    """body: {shots: [{hitFrame, action: confirm|delete|edit, playerId?, stroke?}], added: [{timeS, playerId, stroke}]}
+    Replaces the stored corrections. Also written to storage/labels/ as review-mode training labels."""
+    d = sdir(sid)
+    if not (d / "report.json").exists():
+        raise HTTPException(409, "no report yet")
+    corr = {"shots": [c for c in body.get("shots", []) if isinstance(c.get("hitFrame"), int)],
+            "added": [a for a in body.get("added", []) if isinstance(a.get("timeS"), (int, float))],
+            "updatedAt": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+    (d / "corrections.json").write_text(json.dumps(corr, indent=1))
+    lab = STORE / "labels"; lab.mkdir(exist_ok=True)
+    (lab / f"{sid}_review.json").write_text(json.dumps({"session": sid, "mode": "user_review", **corr}, indent=1))
+    return compact_report(load_report(d))
 
 
 @app.get("/api/v1/sessions/{sid}/video", dependencies=[Depends(auth)])
