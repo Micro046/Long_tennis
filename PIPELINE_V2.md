@@ -3,7 +3,7 @@
 This milestone turns the research spikes into one working chain, from a fixed-phone singles
 video to per-player statistics, implemented twice with identical logic:
 
-* **Python reference** — `scripts/pipeline/` (used for evaluation on public data)
+* **Python reference** — `pipeline/` (used for evaluation on public data)
 * **Android app** — `android/` (Kotlin + ONNX Runtime, on-device, post-session)
 
 Kotlin/Python parity is enforced by JVM unit tests (`android/app/src/test/.../ParityTest.kt`):

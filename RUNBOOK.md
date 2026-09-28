@@ -82,8 +82,8 @@ For a new consented phone recording, follow `BENCHMARK_PROTOCOL.md`, then genera
 ```bash
 # ball (chunked to avoid the PyTorch MPS memory growth), pose, then the session report
 .venv/bin/python scripts/run_ball_chunked.py VIDEO.mp4 --out-dir outputs/v2/ball/youtube
-POSE_THREADS=4 .venv-pose/bin/python scripts/pipeline/pose.py VIDEO.mp4 --calibration CAL.json --out POSE.json
-.venv/bin/python scripts/pipeline/session.py VIDEO.mp4 --ball BALL.json --pose POSE.json --calibration CAL.json \
+POSE_THREADS=4 .venv-pose/bin/python pipeline/pose.py VIDEO.mp4 --calibration CAL.json --out POSE.json
+.venv/bin/python pipeline/session.py VIDEO.mp4 --ball BALL.json --pose POSE.json --calibration CAL.json \
     --model outputs/v2/events/event_model_pred.pkl --out REPORT.json --names "A=Name,B=Name"
 
 # evaluation
