@@ -15,7 +15,7 @@ import cv2
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(1, str(ROOT / "scripts"))
 from pipeline import court  # noqa: E402
 
 COL = {"A": (255, 190, 60), "B": (60, 170, 255), "unknown": (180, 180, 180)}

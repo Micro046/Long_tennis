@@ -1,0 +1,12 @@
+[
+ {"name": "amateur-indoor-4apx (21 min, end changes)", "kind": "identity", "split": "dev",
+  "video": "data/public/youtube_amateur/4apx6gd5Uxs.mp4", "pose": "outputs/v2/pose/youtube/4apx6gd5Uxs_pose.json",
+  "labels": "data/public/youtube_amateur/labels_identity_4apx6gd5Uxs.json"},
+ {"name": "amateur-indoor-low-camera-otJ (13 min)", "kind": "identity", "split": "dev",
+  "video": "data/public/youtube_amateur/otJAg5p7jVw.mp4", "pose": "outputs/v2/pose/youtube/otJAg5p7jVw_pose.json",
+  "labels": "data/public/youtube_amateur/labels_identity_otJAg5p7jVw.json"},
+ {"name": "amateur-indoor-swingvision-view-MZZ (13.6 min)", "kind": "identity", "split": "heldout",
+  "video": "data/public/youtube_amateur/MZzoROG7FlQ.mp4", "pose": "outputs/v2/pose/youtube/MZzoROG7FlQ_pose.json",
+  "labels": "data/public/youtube_amateur/labels_identity_MZzoROG7FlQ.json"},
+ {"name": "TrackNet broadcast, leave-one-game-out (10 games)", "kind": "tracknet_events", "split": "heldout", "source": "pred"}
+]

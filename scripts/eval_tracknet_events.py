@@ -20,7 +20,7 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(1, str(ROOT / "scripts"))
 from pipeline import events as ev  # noqa: E402
 
 DATA = ROOT / "data/public/tracknet/Dataset"

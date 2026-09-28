@@ -23,7 +23,7 @@ import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "third_party/RacketVision/source/BallTrack"))
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(1, str(ROOT / "scripts"))
 W, H, SEQ = 512, 288, 4
 CACHE = ROOT / "work/student_cache"
 

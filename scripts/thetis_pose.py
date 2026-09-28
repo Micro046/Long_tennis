@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 os.environ.setdefault("XDG_CACHE_HOME", str(ROOT / "work/cache"))
 os.environ.setdefault("POSE_THREADS", "3")
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(1, str(ROOT / "scripts"))
 import cv2  # noqa: E402
 import numpy as np  # noqa: E402
 from pipeline.pose import Detector  # noqa: E402

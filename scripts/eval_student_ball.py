@@ -20,7 +20,7 @@ import pandas as pd
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT)); sys.path.insert(1, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT / "third_party/RacketVision/source/BallTrack"))
 from pipeline import ball as B  # noqa: E402
 from train_student_ball import build_model  # noqa: E402

@@ -145,11 +145,18 @@ def tracklet_descriptor(t, frames):
     return np.nanmedian(ds, 0) if not np.isnan(ds).all(0).any() else np.nanmedian(np.where(np.isnan(ds), 0, ds), 0)
 
 
+SIDE_MARGIN_M = 0.8   # a player's median lateral position stays within the doubles width +- this
+
+
 def is_player_tracklet(t, frames, fps):
-    """Players spend time inside the singles court area; officials/ball kids do not."""
+    """Players occupy the court; spectators, officials, ball kids and people on adjacent courts stand
+    beside it. Median lateral position must lie within the doubles width (+-0.8 m) and the tracklet
+    must be mostly inside the court area incl. run-off behind the baselines."""
     if len(t["dets"]) < max(5, int(0.3 * fps)):
         return False
     xs = np.array([frames[f][di]["court"] for f, di in t["dets"].items()])
+    if not (-SIDE_MARGIN_M <= np.median(xs[:, 0]) <= 10.97 + SIDE_MARGIN_M):
+        return False
     inside = (xs[:, 0] > -1.5) & (xs[:, 0] < 12.5) & (xs[:, 1] > -5.5) & (xs[:, 1] < 29.3)
     return inside.mean() > 0.5
 
@@ -230,7 +237,7 @@ def assign_identities(frames, cuts, fps, seed_frame=None, seed_a_side="near", it
             continue
         (pid, a), = out[f].items()
         other = "B" if pid == "A" else "A"
-        cands = [i for i, d in enumerate(dets) if i != a["det"] and -1.5 < d["court"][0] < 12.5
+        cands = [i for i, d in enumerate(dets) if i != a["det"] and -SIDE_MARGIN_M < d["court"][0] < 10.97 + SIDE_MARGIN_M
                  and -6.0 < d["court"][1] < 29.8 and (d["court"][1] > NET_Y) != (a["side"] == "near")]
         if len(cands) == 1:
             d = dets[cands[0]]
