@@ -115,6 +115,51 @@ def ball_handling(frame, ball_px, frames, ident, fps, H, net_img_y=None):
     return False
 
 
+# ----------------------------------------------------------------------------- in-play checks
+MIN_INPLAY_SPEED_MS = 5.0   # ~18 km/h: slower motion is dribbling, rolling, balls lying on court
+
+
+def ground_scale(H_img, H_court, pt):
+    """Image pixels per metre on the court plane at the point under image position pt."""
+    g = np.asarray(court.to_court(H_court, pt), float)
+    a = court.project(H_img, [g, g + [1, 0], g + [0, 1]])
+    return (np.linalg.norm(a[1] - a[0]) + np.linalg.norm(a[2] - a[0])) / 2
+
+
+def ball_speed_ms(frame, ball_px, fps, H_img, H_court, w=8):
+    """Median ball speed (m/s, court-plane scale) over +-w frames; None when too few observations."""
+    v = []
+    for i in range(frame - w, frame + w):
+        if 0 <= i < len(ball_px) - 1 and np.isfinite(ball_px[i]).all() and np.isfinite(ball_px[i + 1]).all():
+            v.append(np.linalg.norm(ball_px[i + 1] - ball_px[i]) * fps / max(1e-6, ground_scale(H_img, H_court, ball_px[i])))
+    return float(np.median(v)) if len(v) >= 4 else None
+
+
+def merge_close_hits(hits, prob, min_gap):
+    """Two hit peaks closer than min_gap frames are one contact: keep the stronger."""
+    out = []
+    for h in sorted(hits, key=lambda h: -prob[h, 1]):
+        if all(abs(h - o) >= min_gap for o in out):
+            out.append(h)
+    return sorted(out)
+
+
+def snap_to_swing(h, pid, frames, ident, radius=9):
+    """Move a hit to the frame where the hitter's faster wrist moves fastest (pose samples within
+    +-radius frames). Ball-trajectory kinks lag the contact when the ball flies toward the camera."""
+    samples = [(f, frames[f][ident[f][pid]["det"]]) for f in range(h - radius, h + radius + 1)
+               if 0 <= f < len(ident) and pid in ident[f]]
+    best, best_v = h, 0.0
+    for (f1, d1), (f2, d2) in zip(samples, samples[1:]):
+        hgt = max(20.0, d1["box"][3] - d1["box"][1])
+        for j in (LWR, RWR):
+            if d1["kps"][j, 2] > 0.3 and d2["kps"][j, 2] > 0.3:
+                v = np.linalg.norm(d2["kps"][j, :2] - d1["kps"][j, :2]) / hgt / (f2 - f1)
+                if v > best_v:
+                    best, best_v = (f1 + f2) // 2, v
+    return best if best_v > 0.04 else h
+
+
 # ----------------------------------------------------------------------------- shots
 def departure_side(frame, ball_px, fps):
     """Camera behind the near baseline: a ball leaving contact upward in the image was hit by the
@@ -405,14 +450,28 @@ def run(video, ball_path, pose_path, calib_path, model_path, out_path, names=Non
     compute_appearance(video, frames, stride=pose_stride)
     ident, tracks, seed = idm.assign_identities(frames, pose.get("sceneCuts", []), fps, seed_a_side=seed_a_side)
     hits, bounces, prob, ball_px = detect_events(ball, model_path)
+    H_img = np.array(cal["imageFromCourt"])
+    slow = {"hits": [], "bounces": []}
+    for key, lst in (("hits", hits), ("bounces", bounces)):
+        for e in lst:
+            sp = ball_speed_ms(e, ball_px, fps, H_img, H_court)
+            if sp is not None and sp < MIN_INPLAY_SPEED_MS:
+                slow[key].append(e)
+    hits = merge_close_hits([h for h in hits if h not in slow["hits"]], prob, int(round(10 * fps / 30)))
+    bounces = [b for b in bounces if b not in slow["bounces"]]
     Himg = ball["video"]["heightPx"]
     net_img_y = float(court.project(np.array(cal["imageFromCourt"]), [(court.CX, court.NET_Y)])[0][1])
-    dead = {"hits": [h for h in hits if ball_handling(h, ball_px, frames, ident, fps, Himg, net_img_y)],
-            "bounces": [b for b in bounces if ball_handling(b, ball_px, frames, ident, fps, Himg, net_img_y)]}
+    # ball_handling()/rally_valid() were replaced by the physical in-play speed floor: they also removed
+    # genuine shots into the net (measured on dev labels, 2026-09-28).
+    dead = {"hits": [], "bounces": []}
     hits = [h for h in hits if h not in dead["hits"]]
     bounces = [b for b in bounces if b not in dead["bounces"]]
+    dead["slowBall"] = slow
+    # a racket contact needs a person within reach of the ball
+    dead["noPlayerInReach"] = [h for h in hits if hitter_for(h, ball_px, frames, ident, fps)[1] is None]
+    hits = [h for h in hits if h not in dead["noPlayerInReach"]]
     hits, dead["sameHitterRepeats"] = attribute_and_dedupe(hits, ball_px, frames, ident, fps)
-    hits, dead["unanswered"] = rally_valid(hits, bounces, ball_px, frames, ident, H_court, fps)
+
     handed = dict(handed or {"A": "right", "B": "right"})   # from setup (default right-handed)
     shots = build_shots(hits, bounces, ball_px, frames, ident, H_court, fps, handed)
     _, votes = estimate_handedness(shots, frames, ident)    # reported as a hint only

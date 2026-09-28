@@ -24,6 +24,17 @@
   "labels": "data/public/youtube_amateur/labels_identity_MZzoROG7FlQ.json"
  },
  {
+  "name": "4apx exhaustive hit/bounce windows (2 x 12 s)",
+  "kind": "events",
+  "split": "dev",
+  "video": "data/public/youtube_amateur/4apx6gd5Uxs.mp4",
+  "pose": "outputs/v2/pose/youtube/4apx6gd5Uxs_pose.json",
+  "ball": "outputs/v2/ball/youtube/4apx6gd5Uxs_ball.json",
+  "calibration": "data/public/youtube_amateur/calibration/4apx6gd5Uxs.json",
+  "labels": "data/public/youtube_amateur/labels_events_4apx6gd5Uxs.json",
+  "identityLabels": "data/public/youtube_amateur/labels_identity_4apx6gd5Uxs.json"
+ },
+ {
   "name": "MZZ exhaustive hit/bounce windows (3 x 12 s)",
   "kind": "events",
   "split": "heldout",

@@ -63,7 +63,8 @@ def match(pred, truth, tol):
 def events_eval(report, labels, tol=None):
     """Exhaustive windows: precision/recall/timing for hits and bounces, hitter and stroke on matched hits.
     Uncertain truth events and intervals are ignored (neither missed nor false)."""
-    tol = tol or labels.get("toleranceFrames", 4)
+    tol_default = tol or labels.get("toleranceFrames", 4)
+    tol_by_kind = {"hits": labels.get("hitToleranceFrames", 8), "bounces": labels.get("bounceToleranceFrames", tol_default)}
     shots = {s["hitFrame"]: s for s in report["shots"]}
     colour = labels.get("pidToColour", {})
     out = {"hits": {"tp": 0, "fp": 0, "fn": 0, "offsets": []}, "bounces": {"tp": 0, "fp": 0, "fn": 0, "offsets": []},
@@ -72,13 +73,14 @@ def events_eval(report, labels, tol=None):
     for w in labels["windows"]:
         a, b = w["start"], w["end"]
 
-        def ignored(f, truth):
+        def ignored(f, truth, tol):
             return any(lo <= f <= hi for lo, hi in w.get("uncertainIntervals", [])) or \
                 any(t.get("uncertain") and abs(t["frameIndex"] - f) <= tol for t in truth)
         for kind, preds in (("hits", report["events"]["hits"]), ("bounces", report["events"]["bounces"])):
+            tol = tol_by_kind[kind]
             truth = w[kind]
             sure = [t["frameIndex"] for t in truth if not t.get("uncertain")]
-            pred = [p for p in preds if a <= p < b and not (ignored(p, truth) and not any(abs(p - s) <= tol for s in sure))]
+            pred = [p for p in preds if a <= p < b and not (ignored(p, truth, tol) and not any(abs(p - s) <= tol for s in sure))]
             m = match(pred, sure, tol)
             d = out[kind]
             d["tp"] += len(m); d["fp"] += len(pred) - len(m); d["fn"] += len(sure) - len(m)
