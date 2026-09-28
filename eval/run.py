@@ -6,6 +6,7 @@ write outputs/eval/<timestamp>.json + regenerate docs/RESULTS.md.
   python eval/run.py identity   # one kind
 """
 import json
+import os
 import subprocess
 import sys
 import time
@@ -44,7 +45,7 @@ def events(b):
     out = ROOT / "outputs/eval/tmp" / (Path(b["video"]).stem + "_report.json")
     out.parent.mkdir(parents=True, exist_ok=True)
     rep = S.run(str(ROOT / b["video"]), str(ROOT / b["ball"]), str(ROOT / b["pose"]), str(ROOT / b["calibration"]),
-                str(ROOT / "models/event_model.pkl"), str(out), {"A": "A", "B": "B"})
+                os.environ.get("LT_EVENT_MODEL", str(ROOT / "models/event_model.pkl")), str(out), {"A": "A", "B": "B"})
     ident = EA.identity_eval(rep, json.loads((ROOT / b["identityLabels"]).read_text()))
     lab = json.loads((ROOT / b["labels"]).read_text())
     lab["pidToColour"] = {"A": ident["colourOfA"], "B": "grey" if ident["colourOfA"] == "red" else "red"}

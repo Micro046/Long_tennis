@@ -23,7 +23,7 @@ def run_video(video, out_dir, seg_s=120.0, segs_per_chunk=1, extra=()):
     for a, b in chunks:
         part = Path(out_dir) / f"{video.stem}_ball_c{a}.json"
         if not part.exists():
-            subprocess.run([PY, str(ROOT / "scripts/pipeline/ball.py"), str(video), "--out-dir", str(out_dir),
+            subprocess.run([PY, str(ROOT / "pipeline/ball.py"), str(video), "--out-dir", str(out_dir),
                             "--start", str(a), "--stop", str(b), "--suffix", f"_c{a}", *extra], check=True)
         parts.append((a, b, part))
     merged = None
@@ -41,7 +41,7 @@ def run_video(video, out_dir, seg_s=120.0, segs_per_chunk=1, extra=()):
 def run_folders(folders, out_dir, per_process=10, extra=()):
     todo = [f for f in folders if not (Path(out_dir) / ("_".join(Path(f).parts[-2:]) + "_ball.json")).exists()]
     for i in range(0, len(todo), per_process):
-        subprocess.run([PY, str(ROOT / "scripts/pipeline/ball.py"), *todo[i:i + per_process], "--out-dir", str(out_dir),
+        subprocess.run([PY, str(ROOT / "pipeline/ball.py"), *todo[i:i + per_process], "--out-dir", str(out_dir),
                         "--name-depth", "2", *extra], check=True)
 
 

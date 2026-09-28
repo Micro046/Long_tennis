@@ -160,6 +160,50 @@ def snap_to_swing(h, pid, frames, ident, radius=9):
     return best if best_v > 0.04 else h
 
 
+def infer_hits_from_bounces(hits, bounces, ball_px, frames, ident, fps, H_court, max_gap_s=4.0, serve_window_s=2.0):
+    """Rally logic on the (reliable) bounces: a bounce on side S followed by the next bounce on the
+    other side implies the player on side S hit the ball in between; the first bounce of a point
+    implies a serve/shot from the other side shortly before. Missing hits are placed at the frame
+    where the ball is closest to that player's racket hand. Existing hits are respected."""
+    def side_of(bf):
+        y = court.to_court(H_court, ball_px[bf])[1] if np.isfinite(ball_px[bf]).all() else None
+        return None if y is None else ("near" if y > court.NET_Y else "far")
+
+    def place(lo, hi, side):
+        best = None
+        for f in range(max(0, lo), min(len(frames), hi)):
+            if not frames[f] or not np.isfinite(ball_px[f]).all():
+                continue
+            for pid, a in ident[f].items():
+                if a["side"] != side:
+                    continue
+                r = reach_distance(ball_px[f], frames[f][a["det"]])
+                if best is None or r < best[0]:
+                    best = (r, f)
+        return best[1] if best and best[0] < 1.5 else None
+
+    bs = sorted(bounces)
+    added = []
+    have = lambda lo, hi: any(lo < h < hi for h in list(hits) + added)
+    for i, b in enumerate(bs):
+        s = side_of(b)
+        if s is None:
+            continue
+        prev = bs[i - 1] if i else None
+        if prev is None or (b - prev) / fps > max_gap_s:   # first bounce of a point: serve/shot before it
+            lo = b - int(serve_window_s * fps)
+            if not have(lo, b - 2):
+                f = place(lo, b - 2, "far" if s == "near" else "near")
+                if f is not None:
+                    added.append(f)
+        nxt = bs[i + 1] if i + 1 < len(bs) else None
+        if nxt is not None and (nxt - b) / fps <= max_gap_s and side_of(nxt) not in (None, s) and not have(b + 2, nxt - 2):
+            f = place(b + 2, nxt - 2, s)
+            if f is not None:
+                added.append(f)
+    return sorted(set(added))
+
+
 # ----------------------------------------------------------------------------- shots
 def departure_side(frame, ball_px, fps):
     """Camera behind the near baseline: a ball leaving contact upward in the image was hit by the
@@ -467,6 +511,9 @@ def run(video, ball_path, pose_path, calib_path, model_path, out_path, names=Non
     hits = [h for h in hits if h not in dead["hits"]]
     bounces = [b for b in bounces if b not in dead["bounces"]]
     dead["slowBall"] = slow
+    added = infer_hits_from_bounces(hits, bounces, ball_px, frames, ident, fps, H_court)
+    hits = sorted(hits + added)
+    dead["addedFromRallyLogic"] = added
     # a racket contact needs a person within reach of the ball
     dead["noPlayerInReach"] = [h for h in hits if hitter_for(h, ball_px, frames, ident, fps)[1] is None]
     hits = [h for h in hits if h not in dead["noPlayerInReach"]]

@@ -1,0 +1,16 @@
+fastapi==0.141.1
+httpx==0.28.1
+mmengine==0.10.7
+numpy==2.5.3
+onnxruntime==1.30.0
+opencv-python==5.0.0.93
+opencv-python-headless==4.11.0.86
+pandas==3.0.6
+pytest==9.1.1
+python-multipart==0.0.32
+rtmlib==0.0.16
+scikit-learn==1.9.1
+scipy==1.18.1
+torch==2.14.0
+torchvision==0.29.0
+uvicorn==0.54.0
