@@ -1,0 +1,29 @@
+# large / generated
+.venv/
+.venv-pose/
+work/
+outputs/
+third_party/
+data/
+!data/public/SOURCES_V2.md
+!data/public/youtube_amateur/
+data/public/youtube_amateur/*
+!data/public/youtube_amateur/labels_*.json
+!data/public/youtube_amateur/calibration/
+!data/benchmark/
+dist/
+**/__pycache__/
+.DS_Store
+*.pyc
+# android build
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/*.keystore
+android/app/src/main/assets/models/*.onnx
+# flutter
+app/**/build/
+app/**/.dart_tool/
+app/**/.flutter-plugins*
+server/storage/

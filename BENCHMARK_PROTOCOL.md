@@ -1,0 +1,26 @@
+# Fixed-phone benchmark protocol
+
+This protocol is for the first supported product: singles, one securely mounted phone, both players visible, post-session analysis. Preserve original footage and consent records separately from distributable code. A public clip with an uncertain camera or rights chain may be used only as a diagnostic, never as a held-out phone result.
+
+## Capture
+
+1. Record a complete singles segment that includes a real end change. Mount the phone safely beyond the court playing area, behind a baseline or another position being evaluated. Keep both players and the full court visible throughout ordinary play. Do not zoom, pan, or re-encode the original file.
+2. Record device model, lens/orientation, nominal capture mode, mount height and distance, lighting, court surface, player pair, venue, and physical session ID. Repeat across distinct devices, courts, clothing combinations, lighting, and player groups. Include 30 and 60 fps where supported and assess both; do not assume a single capture setting will generalize.
+3. Keep the original file's presentation timestamps. Record changes in camera position, interruptions, recording gaps, and any time the whole court leaves view. Capture consent and commercial evaluation rights for the footage and people before use.
+4. Use `data/benchmark/phone_manifest_template.json` to register the file. Assign development or held-out at the physical session level before model inspection. Development and held-out sets cannot share a venue, device, individual player, or player group in the strict benchmark manifest. Keep the same pseudonymous `playerIds` when a person plays with a different partner, so a new pairing cannot hide overlap.
+
+## Independent labels
+
+Annotators should view raw video without model event proposals on the first pass. Fill `phone_labels_template.json` and record exhaustive coverage windows. Change `annotationMode` to `independent_exhaustive` only after every visible racket contact and ground bounce in those windows has been checked. A review of automatic suggestions is a different label mode and cannot establish recall.
+
+- Assign A and B from the initial frame and maintain each identity across the end change. `side` records current near/far position separately. Add `playerObservations` at sampled evaluation frames as `{frameIndex, playerId, side, visibility, bboxPx:[x1,y1,x2,y2]}`. `visibility` is `visible`, `occluded`, or `out_of_frame`; a visible player needs a box. Record a `changeovers` entry with `frameIndex`, `playerId`, `sideBefore`, and `sideAfter` when visually confirmed.
+- A `hit` event is ball–racket contact, not a swing. Use `{id,type:"hit",frameIndex,timestampUs,playerId,strokeClass}`. The allowed stroke classes are `forehand`, `backhand`, `serve`, `volley`, `other`, and `unknown`. `playerId` can be `unknown` when contact attribution is visually unresolved.
+- A `bounce` event is ball–ground contact. Use `{id,type:"bounce",frameIndex,timestampUs,imagePx:[x,y],firstLandingForHitId,landingRegion}`. `firstLandingForHitId` points to the preceding hit only if this is that shot's first landing; otherwise use null. The image point is the observed contact point, not the airborne ball projected through a homography. Region may be one of six named court regions, `outside`, or `unknown`. Use null image point when contact location cannot be resolved.
+- Copy `timestampUs` from the decoded video timestamp sidecar for the labelled frame. The video and label hashes must match. Labels at frame `n` are not assigned time `n / nominal_fps` on variable-frame-rate phone video.
+- Double-label a sample of windows; adjudicate differences without consulting model outputs. Save both original annotator files and an adjudicated version. Record uncertainty explicitly. Do not interpret an unlabelled interval as no events.
+
+Run `scripts/probe_phone_video.py --video /path/video.mp4 --session-id session_001 --output /path/timestamps.json` to obtain frame timestamps and the video hash. Then run `scripts/validate_phone_labels.py --video /path/video.mp4 --labels /path/labels.json --output /path/validation.json`. The event evaluator can then compare candidate events against the independently exhaustive windows. Identity, stroke, landing-position, and changeover metrics must use their own labelled denominators; presence of fields alone is not proof of a complete benchmark.
+
+## Android gate
+
+The current Python pipeline is not a mobile benchmark. Once commercial model rights and a representative phone dataset are settled, run a small native Android inference harness on actual low/mid/high target devices. Measure recording continuity, per-model inference latency, total session analysis time, peak memory, battery drain, device temperature, throttling, storage, and crash/restart recovery. Compare CPU, XNNPACK, and NNAPI only on the same model and device. The official [ONNX Runtime mobile guide](https://onnxruntime.ai/docs/tutorials/mobile/) describes the Android runtime options and measurement categories. The source presentation time for media samples is exposed by Android's [MediaExtractor](https://developer.android.com/reference/android/media/MediaExtractor#getSampleTime()).

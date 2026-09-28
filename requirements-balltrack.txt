@@ -1,0 +1,11 @@
+# Desktop evaluation environment only; this is not the future Flutter/mobile runtime.
+torch==2.14.0
+torchvision==0.29.0
+opencv-python-headless==5.0.0.20250807
+numpy==2.5.3
+mmengine==0.10.7
+scipy==1.18.1
+matplotlib==3.10.8
+parse==1.21.1
+tqdm==4.67.3
+
