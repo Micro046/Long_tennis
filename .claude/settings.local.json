@@ -105,7 +105,26 @@
       "Bash(rm -f flutter.zip)",
       "Bash(curl -sS -L -o flutter.zip \"https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/flutter_macos_arm64_3.47.5-stable.zip\" -w \"%{http_code} %{size_download}\\\\n\")",
       "Bash(unzip -q flutter.zip)",
-      "Bash(rm flutter.zip)"
+      "Bash(rm flutter.zip)",
+      "Bash(xargs ls -la)",
+      "Bash(sort -k5 -n -r)",
+      "Bash(awk '{print $5,$9}')",
+      "Bash(git -c 'user.name=Long Tennis' -c user.email=hassaniftikhar62@gmail.com commit -q -m 'Baseline: pipeline v2 \\(Python\\), Kotlin app, evaluation scripts, docs *)",
+      "Bash(XDG_CACHE_HOME=work/cache .venv/bin/python -c \"import rtmlib, fastapi, onnxruntime; print\\(rtmlib.__version__ if hasattr\\(rtmlib,'__version__'\\) else 'rtmlib ok', fastapi.__version__, onnxruntime.__version__, onnxruntime.get_available_providers\\(\\)\\)\")",
+      "Bash(.venv/bin/python -m pytest server/tests -q -x)",
+      "Bash(sed -i '' 's|  \"t\": 1.0, \"maxWidth\"||' docs/API.md)",
+      "Bash(.venv/bin/python -m pytest server/tests -q)",
+      "Bash(nohup .venv/bin/python -m uvicorn server.app:app --host 0.0.0.0 --port 8765)",
+      "Bash(curl -s http://127.0.0.1:8765/api/v1/health)",
+      "Bash(.venv/bin/python -m server.client analyze data/test_clips/rally30s.mp4 --names A=Red,B=Grey --markers \"far_left_singles:0.3672,0.2944;far_right_singles:0.6224,0.2944;near_service_left:0.1927,0.4852;near_service_right:0.7969,0.4852\")",
+      "Bash(awk 'NR%20==1 || /done|failed|shots|session|video|calib/')",
+      "Bash(kill 69752)",
+      "Bash(sed -i '' 's/8765/8770/g' docs/API.md server/app.py server/client.py)",
+      "Bash(nohup .venv/bin/python -m uvicorn server.app:app --host 0.0.0.0 --port 8770)",
+      "Bash(curl -s http://127.0.0.1:8770/api/v1/health)",
+      "Bash(awk '/done|failed|shots|session|video|calib|Error|error/ || NR%40==1')",
+      "Bash(git add *)",
+      "Bash(git -c 'user.name=Long Tennis' -c user.email=hassaniftikhar62@gmail.com commit -q -m 'Server v1: FastAPI sessions, resumable upload, background-median calibration, job worker, CLI client *)"
     ]
   }
 }
