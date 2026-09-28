@@ -37,7 +37,22 @@ def tracknet_events(b):
     return d["byThreshold"]["0.5"]
 
 
-RUNNERS = {"identity": identity, "tracknet_events": tracknet_events}
+def events(b):
+    """Full session analysis, then exhaustive-window scoring of hits/bounces/hitter/stroke."""
+    from pipeline import session as S
+    import eval_amateur as EA
+    out = ROOT / "outputs/eval/tmp" / (Path(b["video"]).stem + "_report.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    rep = S.run(str(ROOT / b["video"]), str(ROOT / b["ball"]), str(ROOT / b["pose"]), str(ROOT / b["calibration"]),
+                str(ROOT / "models/event_model.pkl"), str(out), {"A": "A", "B": "B"})
+    ident = EA.identity_eval(rep, json.loads((ROOT / b["identityLabels"]).read_text()))
+    lab = json.loads((ROOT / b["labels"]).read_text())
+    lab["pidToColour"] = {"A": ident["colourOfA"], "B": "grey" if ident["colourOfA"] == "red" else "red"}
+    r = EA.events_eval(rep, lab)
+    return {k: r[k] for k in ("hits", "bounces", "hitter", "stroke")} | {"details": r["details"]}
+
+
+RUNNERS = {"events": events, "identity": identity, "tracknet_events": tracknet_events}
 
 
 def main(kinds):
@@ -46,11 +61,11 @@ def main(kinds):
     for b in bench:
         if kinds and b["kind"] not in kinds:
             continue
-        if not all((ROOT / b[k]).exists() for k in ("video", "pose", "labels") if k in b):
+        if not all((ROOT / b[k]).exists() for k in ("video", "pose", "labels", "ball", "calibration") if k in b):
             results.append({**b, "skipped": "inputs missing"}); continue
         t0 = time.time()
         results.append({**b, "result": RUNNERS[b["kind"]](b), "seconds": round(time.time() - t0)})
-        print(b["name"], results[-1]["result"], flush=True)
+        print(b["name"], {k: v for k, v in results[-1]["result"].items() if k != "details"}, flush=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=ROOT).stdout.strip()
     out = ROOT / "outputs/eval" / f"{stamp}.json"
@@ -62,6 +77,11 @@ def main(kinds):
         res = r.get("result")
         if r["kind"] == "identity" and res:
             txt = f"{res['correct']} correct / {res['wrong']} wrong / {res['missed']} missed -> **{res['accuracyOfVisible']:.1%}**"
+        elif r["kind"] == "events" and res:
+            h, bo, ht, st = res["hits"], res["bounces"], res["hitter"], res["stroke"]
+            txt = (f"hits P {h['precision']} R {h['recall']} (**F1 {h['f1']}**); bounces P {bo['precision']} R {bo['recall']} "
+                   f"(**F1 {bo['f1']}**); hitter {ht['correct']}/{ht['correct'] + ht['wrong'] + ht['unknown']}; "
+                   f"stroke {st['correct']}/{st['total']}")
         elif r["kind"] == "tracknet_events" and res:
             txt = f"hit F1 **{res['hit']['f1']}** (P {res['hit']['precision']}, R {res['hit']['recall']}); bounce F1 **{res['bounce']['f1']}** (P {res['bounce']['precision']}, R {res['bounce']['recall']})"
         else:

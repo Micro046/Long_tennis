@@ -395,6 +395,9 @@ def summarize(shots, names):
 def run(video, ball_path, pose_path, calib_path, model_path, out_path, names=None, seed_a_side="near", pose_stride=3,
         handed=None):
     ball, pose, cal = load_inputs(ball_path, pose_path, calib_path)
+    n = min(len(ball["frames"]), len(pose["frames"]))  # analyse the common span only
+    ball["frames"], pose["frames"] = ball["frames"][:n], pose["frames"][:n]
+    ball["video"]["frameCount"] = n
     fps = ball["video"]["fps"]
     H_court = np.array(cal["courtFromImage"])
     # the phone runs pose on every `pose_stride`-th frame; mimic that exactly

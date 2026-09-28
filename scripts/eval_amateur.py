@@ -60,37 +60,50 @@ def match(pred, truth, tol):
     return m
 
 
-def events_eval(report, labels, tol=4):
+def events_eval(report, labels, tol=None):
+    """Exhaustive windows: precision/recall/timing for hits and bounces, hitter and stroke on matched hits.
+    Uncertain truth events and intervals are ignored (neither missed nor false)."""
+    tol = tol or labels.get("toleranceFrames", 4)
     shots = {s["hitFrame"]: s for s in report["shots"]}
-    colour_to_pid = None
-    out = {"hits": {"tp": 0, "fp": 0, "fn": 0}, "bounces": {"tp": 0, "fp": 0, "fn": 0},
-           "hitter": {"correct": 0, "wrong": 0, "unknown": 0}, "stroke": {"confusion": {}}, "windows": []}
+    colour = labels.get("pidToColour", {})
+    out = {"hits": {"tp": 0, "fp": 0, "fn": 0, "offsets": []}, "bounces": {"tp": 0, "fp": 0, "fn": 0, "offsets": []},
+           "hitter": {"correct": 0, "wrong": 0, "unknown": 0}, "stroke": {"correct": 0, "total": 0, "confusion": {}},
+           "details": []}
     for w in labels["windows"]:
         a, b = w["start"], w["end"]
-        ph = [h for h in report["events"]["hits"] if a <= h < b]
-        pb = [x for x in report["events"]["bounces"] if a <= x < b]
-        th = [h["frameIndex"] for h in w["hits"]]
-        tb = [x["frameIndex"] for x in w["bounces"]]
-        mh, mb = match(ph, th, tol), match(pb, tb, tol)
-        out["hits"]["tp"] += len(mh); out["hits"]["fp"] += len(ph) - len(mh); out["hits"]["fn"] += len(th) - len(mh)
-        out["bounces"]["tp"] += len(mb); out["bounces"]["fp"] += len(pb) - len(mb); out["bounces"]["fn"] += len(tb) - len(mb)
-        for h in w["hits"]:
-            p = mh.get(h["frameIndex"])
-            if p is None:
-                continue
-            s = shots.get(p)
-            pred_colour = w.get("colourOfA_", None)
-            if s is None:
-                continue
-            pc = labels["pidToColour"].get(s["playerId"]) if "pidToColour" in labels else None
-            key = "unknown" if s["playerId"] == "unknown" else ("correct" if pc == h["player"] else "wrong")
-            out["hitter"][key] += 1
-            cm = out["stroke"]["confusion"].setdefault(h["stroke"], {})
-            cm[s["stroke"]] = cm.get(s["stroke"], 0) + 1
-        out["windows"].append({"start": a, "end": b, "predHits": ph, "trueHits": th, "predBounces": pb, "trueBounces": tb})
+
+        def ignored(f, truth):
+            return any(lo <= f <= hi for lo, hi in w.get("uncertainIntervals", [])) or \
+                any(t.get("uncertain") and abs(t["frameIndex"] - f) <= tol for t in truth)
+        for kind, preds in (("hits", report["events"]["hits"]), ("bounces", report["events"]["bounces"])):
+            truth = w[kind]
+            sure = [t["frameIndex"] for t in truth if not t.get("uncertain")]
+            pred = [p for p in preds if a <= p < b and not (ignored(p, truth) and not any(abs(p - s) <= tol for s in sure))]
+            m = match(pred, sure, tol)
+            d = out[kind]
+            d["tp"] += len(m); d["fp"] += len(pred) - len(m); d["fn"] += len(sure) - len(m)
+            d["offsets"] += [p - t for t, p in m.items()]
+            out["details"].append({"window": [a, b], "kind": kind, "truth": sure, "pred": pred,
+                                   "missed": [t for t in sure if t not in m], "false": [p for p in pred if p not in m.values()]})
+            if kind == "hits":
+                for t in truth:
+                    p = m.get(t["frameIndex"])
+                    s = shots.get(p) if p is not None else None
+                    if s is None:
+                        continue
+                    pc = colour.get(s["playerId"])
+                    key = "unknown" if pc is None else ("correct" if pc == t["player"] else "wrong")
+                    out["hitter"][key] += 1
+                    if key == "correct":
+                        out["stroke"]["total"] += 1
+                        out["stroke"]["correct"] += s["stroke"] == t["stroke"]
+                        cm = out["stroke"]["confusion"].setdefault(t["stroke"], {})
+                        cm[s["stroke"]] = cm.get(s["stroke"], 0) + 1
     for k in ("hits", "bounces"):
         d = out[k]; p = d["tp"] / max(1, d["tp"] + d["fp"]); r = d["tp"] / max(1, d["tp"] + d["fn"])
-        d.update(precision=round(p, 3), recall=round(r, 3), f1=round(2 * p * r / max(1e-9, p + r), 3))
+        d.update(precision=round(p, 3), recall=round(r, 3), f1=round(2 * p * r / max(1e-9, p + r), 3),
+                 meanAbsOffset=round(float(np.mean(np.abs(d["offsets"]))), 2) if d["offsets"] else None)
+        del d["offsets"]
     return out
 
 
@@ -107,7 +120,7 @@ if __name__ == "__main__":
         el = json.loads(Path(a.event_labels).read_text())
         el["pidToColour"] = {"A": res["identity"]["colourOfA"], "B": "grey" if res["identity"]["colourOfA"] == "red" else "red"}
         res["events"] = events_eval(rep, el)
-    summary = {k: {kk: vv for kk, vv in v.items() if kk not in ("items", "windows")} for k, v in res.items()}
+    summary = {k: {kk: vv for kk, vv in v.items() if kk not in ("items", "windows", "details")} for k, v in res.items()}
     print(json.dumps(summary, indent=1))
     if a.out:
         Path(a.out).write_text(json.dumps(res, indent=1))

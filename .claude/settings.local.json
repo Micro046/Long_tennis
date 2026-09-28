@@ -128,7 +128,8 @@
       "Bash(~/development/flutter/bin/flutter --version)",
       "Bash(sed -i '' 's|sys.path.insert\\(0, str\\(ROOT / \"scripts\"\\)\\)\\\\nfrom pipeline|X|' scripts/eval_identity_only.py)",
       "Bash(.venv/bin/python scripts/eval_identity_only.py data/public/youtube_amateur/otJAg5p7jVw.mp4 outputs/v2/pose/youtube/otJAg5p7jVw_pose.json data/public/youtube_amateur/labels_identity_otJAg5p7jVw.json --out outputs/v2/identity_eval_otJ.json)",
-      "Bash(git -c 'user.name=Long Tennis' -c user.email=hassaniftikhar62@gmail.com commit -q -m 'Flutter client v1 \\(Android + iOS project\\): server settings, sessions, record/import, resumable upload, court setup on median background, progress, report \\(summary, landing map, shots with server video playback\\) *)"
+      "Bash(git -c 'user.name=Long Tennis' -c user.email=hassaniftikhar62@gmail.com commit -q -m 'Flutter client v1 \\(Android + iOS project\\): server settings, sessions, record/import, resumable upload, court setup on median background, progress, report \\(summary, landing map, shots with server video playback\\) *)",
+      "Bash(.venv/bin/python eval/run.py identity events)"
     ]
   }
 }
