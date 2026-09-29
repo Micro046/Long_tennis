@@ -107,6 +107,8 @@ def build_tracklets(frames, cuts, fps, gate_m=1.2, max_gap=8):
             dt = i - t["last"]
             pred = np.array(t["pos"]) + np.array(t["vel"]) * dt
             for di, d in enumerate(dets):
+                if d.get("static"):
+                    continue
                 dist = np.linalg.norm(np.array(d["court"]) - pred)
                 if dist < gate_m + 0.25 * dt:
                     pairs.append((dist, ti, di))
@@ -127,7 +129,7 @@ def build_tracklets(frames, cuts, fps, gate_m=1.2, max_gap=8):
             t["pos"], t["last"] = newpos.tolist(), i
             t["dets"][i] = di
         for di, d in enumerate(dets):
-            if di not in used_d:
+            if di not in used_d and not d.get("static"):
                 active.append({"pos": list(d["court"]), "vel": [0.0, 0.0], "last": i, "start": i, "dets": {i: di}})
     done += active
     for k, t in enumerate(done):
@@ -161,7 +163,31 @@ def is_player_tracklet(t, frames, fps):
     return inside.mean() > 0.5
 
 
+def mark_static_objects(frames, cell=12, min_share=0.15):
+    """Background objects the detector mistakes for people (doors, bags on chairs, posters) stay at the
+    same pixels for a large share of the session; players never do. Marks such detections 'static'."""
+    seen = [f for f in frames if f]
+    if len(seen) < 50:
+        return 0
+    counts = {}
+    def key(d):
+        x1, y1, x2, y2 = d["box"]
+        return (int((x1 + x2) / 2 // cell), int(y2 // cell), int((y2 - y1) // cell))
+    for dets in seen:
+        for k in {key(d) for d in dets}:
+            counts[k] = counts.get(k, 0) + 1
+    hot = {k for k, c in counts.items() if c / len(seen) >= min_share}
+    n = 0
+    for dets in seen:
+        for d in dets:
+            cx, cy, ch = key(d)
+            if any((cx + a, cy + b, ch + c) in hot for a in (-1, 0, 1) for b in (-1, 0, 1) for c in (-1, 0, 1)):
+                d["static"] = True; n += 1
+    return n
+
+
 def assign_identities(frames, cuts, fps, seed_frame=None, seed_a_side="near", iterations=4, min_margin=0.04):
+    mark_static_objects(frames)
     tracks = [t for t in build_tracklets(frames, cuts, fps) if is_player_tracklet(t, frames, fps)]
     for t in tracks:
         t["desc"] = tracklet_descriptor(t, frames)
@@ -237,7 +263,7 @@ def assign_identities(frames, cuts, fps, seed_frame=None, seed_a_side="near", it
             continue
         (pid, a), = out[f].items()
         other = "B" if pid == "A" else "A"
-        cands = [i for i, d in enumerate(dets) if i != a["det"] and -SIDE_MARGIN_M < d["court"][0] < 10.97 + SIDE_MARGIN_M
+        cands = [i for i, d in enumerate(dets) if i != a["det"] and not d.get("static") and -SIDE_MARGIN_M < d["court"][0] < 10.97 + SIDE_MARGIN_M
                  and -6.0 < d["court"][1] < 29.8 and (d["court"][1] > NET_Y) != (a["side"] == "near")]
         if len(cands) == 1:
             d = dets[cands[0]]

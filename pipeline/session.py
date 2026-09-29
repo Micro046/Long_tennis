@@ -241,6 +241,8 @@ def hitter_for(frame, ball_px, frames, ident, fps):
             continue
         det_to_pid = {a["det"]: pid for pid, a in ident[f].items()}
         for di, d in enumerate(frames[f]):
+            if d.get("static"):  # doors, bags etc. mistaken for people
+                continue
             r = reach_distance(b, d)
             if best is None or r < best[0]:
                 best = (r, det_to_pid.get(di, "unknown"))
