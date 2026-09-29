@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Long Tennis – How the analysis works</title>
+<style>
+  @page { size: A4; margin: 16mm 15mm 18mm 15mm; }
+  :root { --ink:#1d2226; --muted:#5b6670; --line:#d9dee3; --accent:#1f6f5c; --accent2:#c0582b; --soft:#f3f6f5; --warn:#fff4e5; --bad:#fdecec; --good:#eaf6ee; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; color: var(--ink); font-size: 10.6pt; line-height: 1.5; margin: 0; background: #fff; }
+  h1 { font-size: 22pt; margin: 0 0 6pt; color: var(--accent); }
+  h2 { font-size: 16pt; margin: 0 0 8pt; color: var(--accent); border-bottom: 2px solid var(--accent); padding-bottom: 3pt; }
+  h3 { font-size: 12pt; margin: 14pt 0 4pt; }
+  h4 { font-size: 10.8pt; margin: 10pt 0 3pt; }
+  p { margin: 4pt 0 7pt; }
+  section { page-break-before: always; }
+  .nobreak { page-break-inside: avoid; }
+  .cover { height: 250mm; display: flex; flex-direction: column; justify-content: center; }
+  .cover .sub { font-size: 14pt; color: var(--muted); margin-bottom: 18pt; }
+  .cover .meta { font-size: 10pt; color: var(--muted); margin-top: 24pt; }
+  figure { margin: 8pt 0 10pt; page-break-inside: avoid; }
+  figure img { width: 100%; border: 1px solid var(--line); border-radius: 3px; }
+  figcaption { font-size: 9pt; color: var(--muted); margin-top: 3pt; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt; font-size: 9.6pt; page-break-inside: avoid; }
+  th, td { border: 1px solid var(--line); padding: 4pt 6pt; vertical-align: top; text-align: left; }
+  th { background: var(--soft); }
+  .box { border-left: 4px solid var(--accent); background: var(--soft); padding: 6pt 10pt; margin: 8pt 0; page-break-inside: avoid; }
+  .box.warn { border-color: #d98a00; background: var(--warn); }
+  .box.bad { border-color: #c33; background: var(--bad); }
+  .box.good { border-color: #2a8a4a; background: var(--good); }
+  .box b.t { display: block; margin-bottom: 2pt; }
+  code, .mono { font-family: Menlo, Consolas, monospace; font-size: 9pt; background: #f1f1f1; padding: 0 2pt; border-radius: 2px; }
+  .formula { font-family: Menlo, Consolas, monospace; font-size: 9.6pt; background: #f7f7f7; border: 1px solid var(--line); padding: 6pt 10pt; margin: 6pt 0 8pt; white-space: pre-wrap; page-break-inside: avoid; }
+  ol, ul { margin: 3pt 0 7pt 16pt; padding: 0; }
+  li { margin: 2pt 0; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10pt; }
+  .toc li { margin: 3pt 0; }
+  .tag { display: inline-block; font-size: 8.5pt; padding: 0 5pt; border-radius: 8pt; color: #fff; background: var(--accent); }
+  .tag.o { background: var(--accent2); } .tag.g { background: #777; }
+  .small { font-size: 9pt; color: var(--muted); }
+  svg text { font-family: -apple-system, "Helvetica Neue", Arial, sans-serif; }
+</style>
+</head>
+<body>
+
+<!-- ================================================================ COVER -->
+<div class="cover">
+  <h1 style="font-size:30pt">Long Tennis</h1>
+  <div class="sub">How the analysis works — the complete workflow, from video frames to the player report</div>
+  <p>This document explains, step by step, what happens to a tennis video after it is recorded: which frames we look at, how the court is measured, how the ball and the players are found, how hits and bounces are detected, how we decide who hit, which stroke it was, where the ball landed and how fast it was. It also lists every model used, what we train ourselves, how we measure accuracy, what the frame-by-frame review of test video 1 showed, and what we will improve next and how.</p>
+  <p>It is written so that someone new to the project can follow it. Technical details (exact numbers and rules) are included, because they are what the system really does — they come directly from the code at the commit listed below.</p>
+  <div class="meta">
+    Version 1 · 29 September 2026 · engine commit <span class="mono">efe50d2</span> (pipeline unchanged since <span class="mono">aa3af60</span>)<br>
+    Example figures are from test video 1 (“Orange vs Blue”, 60 s, 1920×1080, 30 fps), server session <span class="mono">3ce88198</span>.
+  </div>
+</div>
+
+<!-- ================================================================ CONTENTS -->
+<section>
+<h2>Contents</h2>
+<ol class="toc">
+  <li>What the system does</li>
+  <li>The big picture: app → server → engine → report</li>
+  <li>Recording requirements (camera position)</li>
+  <li>Which frames we look at (frame selection)</li>
+  <li>Step 1 – Court calibration: from pixels to metres</li>
+  <li>Step 2 – Ball tracking</li>
+  <li>Step 3 – Player detection and body pose</li>
+  <li>Step 4 – Player identity (who is who, across changeovers)</li>
+  <li>Step 5 – Hit and bounce detection</li>
+  <li>Step 6 – Clean-up rules after detection</li>
+  <li>Step 7 – Who hit the ball</li>
+  <li>Step 8 – Stroke type (serve, forehand, backhand, volley, overhead)</li>
+  <li>Step 9 – Landing position, region and in/out</li>
+  <li>Step 10 – Ball speed</li>
+  <li>Step 11 – The report, the app, and corrections</li>
+  <li>All models used</li>
+  <li>Do we train our own models?</li>
+  <li>How we measure accuracy</li>
+  <li>What the frame-by-frame review of test 1 showed</li>
+  <li>What we will improve, and how</li>
+  <li>Test plan: making it work for any video</li>
+  <li>Glossary</li>
+</ol>
+</section>
+
+<!-- ================================================================ 1 -->
+<section>
+<h2>1. What the system does</h2>
+<p>A player puts a phone on a fixed stand <b>behind one baseline</b> and records a singles match or practice. After the session the video is analysed and every player gets a report:</p>
+<ul>
+  <li><b>Shots</b>: every shot with time, player, and stroke type (serve, forehand, backhand, volley, overhead).</li>
+  <li><b>Landing</b>: where the first bounce of each shot landed — one of six regions of the opponent's half (deep/short × left/centre/right), or out.</li>
+  <li><b>Speed</b>: an average ball speed per shot.</li>
+  <li><b>Identity</b>: the two players are kept apart for the whole session, including when they change ends.</li>
+</ul>
+<p>Everything is computed from the video alone: no sensors, no second camera, no internet service.</p>
+
+<h3>The two things that make this hard</h3>
+<div class="box"><b class="t">1. The camera sees a flat picture of a 3-D world.</b>
+From one camera we know exactly where things are <i>on the ground</i> (feet, bounces), because the court floor is a known flat plane. For a ball in the air we only know the direction it is in, not its height. Many rules below exist because of this.</div>
+<div class="box"><b class="t">2. The far player is small and the near player is big.</b>
+In a 1080p video the near player is ~250 px tall and the far player ~50 px. The same distance in pixels means very different distances in metres, and the ball flying over the far court often appears to “touch” the far player in the image. Several errors found in the review come from this.</div>
+
+<h3>What happens, in one sentence per step</h3>
+<table>
+<tr><th>#</th><th>Step</th><th>What it produces</th></tr>
+<tr><td>1</td><td>Court calibration</td><td>A mapping between image pixels and court metres</td></tr>
+<tr><td>2</td><td>Ball tracking</td><td>Ball position (x, y) in every frame, or “not seen”</td></tr>
+<tr><td>3</td><td>Player detection + pose</td><td>Every person's box, 17 body points, and court position in metres</td></tr>
+<tr><td>4</td><td>Identity</td><td>Which person is player A and which is player B, in every frame</td></tr>
+<tr><td>5</td><td>Hit / bounce detection</td><td>Frames where the ball was hit or bounced</td></tr>
+<tr><td>6</td><td>Clean-up rules</td><td>Removes impossible events, adds missing hits implied by bounces</td></tr>
+<tr><td>7</td><td>Hitter</td><td>Who hit each shot</td></tr>
+<tr><td>8</td><td>Stroke type</td><td>Serve / forehand / backhand / volley / overhead</td></tr>
+<tr><td>9</td><td>Landing</td><td>Bounce point in metres, region, in/out</td></tr>
+<tr><td>10</td><td>Speed</td><td>Average km/h from hitter to bounce</td></tr>
+<tr><td>11</td><td>Report</td><td>Per-player totals and percentages, shown in the app</td></tr>
+</table>
+</section>
+
+<!-- ================================================================ 2 -->
+<section>
+<h2>2. The big picture: app → server → engine → report</h2>
+<p>The phone is too slow to run these models on a full match (tested: even the smallest ball model was far from real time on the phone). So the <b>phone records and uploads</b>, and a <b>server analyses</b>. Today the server is the Mac; later it will be the RTX laptop (NVIDIA GPU) and optionally a cloud GPU. The same code runs on all of them.</p>
+
+<svg viewBox="0 0 760 300" width="100%" role="img" aria-label="System overview">
+  <defs><marker id="ar" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#1f6f5c"/></marker></defs>
+  <rect x="10" y="20" width="180" height="250" rx="8" fill="#eef5f2" stroke="#1f6f5c"/>
+  <text x="100" y="42" text-anchor="middle" font-weight="bold" font-size="14">Flutter app (phone)</text>
+  <text x="24" y="70" font-size="12">• record or import video</text>
+  <text x="24" y="92" font-size="12">• resumable upload</text>
+  <text x="24" y="114" font-size="12">• court setup: tap 4 points</text>
+  <text x="24" y="136" font-size="12">• start analysis, progress</text>
+  <text x="24" y="158" font-size="12">• report: summary, landing</text>
+  <text x="34" y="176" font-size="12">map, shot list with video</text>
+  <text x="24" y="198" font-size="12">• shot editor (corrections)</text>
+  <rect x="270" y="20" width="200" height="250" rx="8" fill="#fbf1ec" stroke="#c0582b"/>
+  <text x="370" y="42" text-anchor="middle" font-weight="bold" font-size="14">Server (FastAPI)</text>
+  <text x="284" y="70" font-size="12">• sessions + storage</text>
+  <text x="284" y="92" font-size="12">• upload in 8 MB chunks</text>
+  <text x="284" y="114" font-size="12">• background image +</text>
+  <text x="294" y="132" font-size="12">calibration check</text>
+  <text x="284" y="154" font-size="12">• job queue → engine</text>
+  <text x="284" y="176" font-size="12">• report + corrections API</text>
+  <text x="284" y="198" font-size="12">• /dl download page</text>
+  <rect x="550" y="20" width="200" height="250" rx="8" fill="#f3f3f3" stroke="#555"/>
+  <text x="650" y="42" text-anchor="middle" font-weight="bold" font-size="14">Engine (pipeline/)</text>
+  <text x="564" y="70" font-size="12">ball.py  – ball tracker (GPU)</text>
+  <text x="564" y="92" font-size="12">pose.py  – people + pose (CPU)</text>
+  <text x="574" y="110" font-size="11" fill="#666">(both run in parallel)</text>
+  <text x="564" y="134" font-size="12">court.py – calibration</text>
+  <text x="564" y="156" font-size="12">identity.py – A / B</text>
+  <text x="564" y="178" font-size="12">events.py – hits, bounces</text>
+  <text x="564" y="200" font-size="12">session.py – shots, strokes,</text>
+  <text x="574" y="218" font-size="12">landing, speed, report</text>
+  <line x1="190" y1="95" x2="266" y2="95" stroke="#1f6f5c" stroke-width="2" marker-end="url(#ar)"/>
+  <text x="228" y="88" text-anchor="middle" font-size="10">video</text>
+  <line x1="266" y1="190" x2="194" y2="190" stroke="#1f6f5c" stroke-width="2" marker-end="url(#ar)"/>
+  <text x="228" y="206" text-anchor="middle" font-size="10">report</text>
+  <line x1="470" y1="150" x2="546" y2="150" stroke="#1f6f5c" stroke-width="2" marker-end="url(#ar)"/>
+  <text x="508" y="143" text-anchor="middle" font-size="10">job</text>
+  <line x1="546" y1="240" x2="474" y2="240" stroke="#1f6f5c" stroke-width="2" marker-end="url(#ar)"/>
+  <text x="508" y="256" text-anchor="middle" font-size="10">report.json</text>
+</svg>
+
+<h3>A session, from the user's side</h3>
+<ol>
+  <li><b>New session</b>: enter the two names, tick which player is near the camera at the start (this seeds identity), and each player's handedness.</li>
+  <li><b>Upload</b>: the video is sent in 8 MB pieces; if the connection drops, the upload resumes where it stopped.</li>
+  <li><b>Court setup</b>: the app shows a picture of the empty court and the user drags 4 markers onto known court points. The server snaps them to the painted lines and returns the fitted court; the user confirms.</li>
+  <li><b>Analyse</b>: the job is queued. Progress and remaining time are shown (ball 45 %, pose 45 %, analysis 10 % of the bar).</li>
+  <li><b>Report</b>: summary per player, landing map, and a shot list. Each shot can be watched and corrected (change player or stroke, delete a false shot, add a missed one); the server recomputes the report and keeps the corrections as labels for training.</li>
+</ol>
+
+<h3>Files of one session (on the server)</h3>
+<table>
+<tr><th>File</th><th>Content</th></tr>
+<tr><td><code>meta.json</code></td><td>names, which side A starts on, handedness, quality, status</td></tr>
+<tr><td><code>video.mp4</code></td><td>the uploaded recording</td></tr>
+<tr><td><code>background.jpg</code></td><td>median background image (players removed) used for court setup</td></tr>
+<tr><td><code>calibration.json</code></td><td>court ↔ image mapping, markers, quality numbers</td></tr>
+<tr><td><code>ball.json</code></td><td>ball x, y, confidence per frame</td></tr>
+<tr><td><code>pose.json</code></td><td>people per analysed frame: box, score, court position, 17 body points</td></tr>
+<tr><td><code>report.json</code></td><td>players, shots, events, per-frame identity</td></tr>
+<tr><td><code>corrections.json</code></td><td>user's edits from the shot editor</td></tr>
+</table>
+<p class="small">Processing time today (Mac, Apple GPU): the 60-s test video took <b>216 s</b> in total (ball tracker ≈ 8.5 frames per second; pose runs in parallel on the CPU). A full hour of video would take about 3–4 hours on the Mac; the RTX laptop is expected to be several times faster.</p>
+</section>
+
+<!-- ================================================================ 3 -->
+<section>
+<h2>3. Recording requirements (camera position)</h2>
+<p>The system is designed and tested for one camera setup. All geometry rules assume it.</p>
+<table>
+<tr><th>Requirement</th><th>Why</th></tr>
+<tr><td>Phone <b>fixed</b> (tripod or fence mount), not moving during the session</td><td>Calibration is done once; the court must stay at the same pixels. The background image is a median over the whole video.</td></tr>
+<tr><td><b>Behind one baseline</b>, centred, as high as practical (2–3 m is ideal)</td><td>“Near” and “far” player are defined by this. Higher = less overlap between the far player and the ball.</td></tr>
+<tr><td>Whole court visible, including both baselines and both singles sidelines</td><td>Bounces and players outside the picture cannot be measured.</td></tr>
+<tr><td>Landscape, 1080p, 30 fps or more</td><td>The ball is only a few pixels wide; at 30 fps a fast ball moves ~1 m between frames.</td></tr>
+<tr><td>Singles, two players</td><td>Identity logic assumes exactly two players.</td></tr>
+</table>
+<p>Tested so far on: indoor courts with a fixed camera behind the baseline (three different public amateur videos with different heights and lenses). Not supported: corner cameras, moving/hand-held cameras, broadcast TV views with cuts (cuts are detected and handled only for identity).</p>
+</section>
+
+<!-- ================================================================ 4 -->
+<section>
+<h2>4. Which frames we look at (frame selection)</h2>
+<p>A 30 fps video has 1,800 frames per minute. Different steps need different amounts of frames. This table is the complete list:</p>
+<table>
+<tr><th>Used for</th><th>Which frames</th><th>Why this choice</th></tr>
+<tr><td>Court setup picture</td><td>31 frames spread evenly over the whole video → pixel-wise <b>median</b></td><td>Players and ball are never at the same place for long, so the median shows the empty court. Court lines are then clean for line snapping.</td></tr>
+<tr><td>Ball tracker background</td><td>48 frames spread over each 120-s segment → median, at 512×288</td><td>The tracker compares each frame with the empty court; a fresh background every 2 minutes follows slow light changes.</td></tr>
+<tr><td>Ball tracking</td><td><b>Every frame</b>. Each prediction sees the background + the 4 most recent frames (t-3 … t)</td><td>The ball moves fast; skipping frames would miss hits and bounces. Seeing several frames lets the model use motion, not just colour.</td></tr>
+<tr><td>People + pose</td><td><b>Every 3rd frame</b> (“standard”), every frame in “best” quality</td><td>People move much slower than the ball; every 3rd frame (10 per second) is enough and is 3× faster.</td></tr>
+<tr><td>Clothing colours (identity)</td><td>Same frames as pose</td><td>Needs the pose to know where the shirt and shorts are.</td></tr>
+<tr><td>Scene-cut detection</td><td>Every frame, shrunk to 160×90 grey</td><td>If the average pixel change between two frames is &gt; 25 (of 255), it is a cut (edited videos). Player tracks are broken at cuts.</td></tr>
+<tr><td>Hit/bounce features</td><td>Every frame, looking ±1 to ±8 frames around it</td><td>A hit or bounce is a change of motion; we compare the ball's motion just before and just after each frame.</td></tr>
+<tr><td>Review PDF</td><td>Frames −6, −3, 0, +3, +6 around every event</td><td>Enough to see the contact or bounce with your own eyes.</td></tr>
+</table>
+<figure><img src="fig/tracker_input.jpg"><figcaption>What the ball tracker sees for one prediction: the median background and the last 4 frames, all resized to 512×288 pixels.</figcaption></figure>
+</section>
+
+<!-- ================================================================ 5 -->
+<section>
+<h2>5. Step 1 – Court calibration: from pixels to metres</h2>
+<p>A tennis court has fixed, known dimensions. If we know where four court points are in the picture, we can compute a <b>homography</b>: a mathematical mapping between any point on the court floor (in metres) and its pixel in the image, in both directions.</p>
+<div class="two">
+<figure><img src="fig/background.jpg"><figcaption>Median background: the empty court (players removed automatically).</figcaption></figure>
+<figure><img src="fig/raw_frame.jpg"><figcaption>A normal frame of the same video, for comparison.</figcaption></figure>
+</div>
+<h3>How it is done</h3>
+<ol>
+  <li><b>User places 4 markers</b> roughly on known points (e.g. the two far singles corners and the two ends of the near service line). Any 4 of 14 named points can be used.</li>
+  <li>A first homography is computed from these 4 points.</li>
+  <li><b>Line snapping</b>: every court line (baselines, sidelines, service lines, centre line — 9 lines) is projected into the image. Near each projected line we look for white paint pixels (bright, low colour saturation, brighter than their surroundings) in a band of ±12 pixels and fit a straight line through them with a robust fit (outliers ignored).</li>
+  <li>Fitted lines are <b>intersected</b> to get precise corner points, even if a corner is outside the picture.</li>
+  <li>A new homography is fitted from all corners (RANSAC). Because the net can look like the far baseline in low views, three candidate fits are tried (all points / near half only / far half only) and we keep the one whose projected lines lie on the most white paint (“line support”).</li>
+  <li>Steps 3–5 are repeated 3 times.</li>
+</ol>
+<figure><img src="fig/calibration.jpg"><figcaption>Test 1: the 4 markers the user placed (magenta) and the fitted court lines (yellow). Result: 9 corner points used, average error 1.8 pixels, 88 % of the projected line length lies on white paint.</figcaption></figure>
+<h3>Quality check</h3>
+<p>The calibration is accepted when at least 4 corners were used, the average reprojection error is below 12 pixels, and line support is above 60 %. Otherwise the app asks the user to adjust the markers.</p>
+<h3>Court coordinates used everywhere</h3>
+<p>Metres. Origin = far-left doubles corner as seen from the camera. <b>x</b> goes across the court (0 → 10.97 m), <b>y</b> goes from the far baseline (0) to the near baseline (23.77 m). The net is at y = 11.885 m. Singles sidelines are at x = 1.37 and 9.60 m; service lines at y = 5.485 and 18.285 m.</p>
+<div class="box warn"><b class="t">Important limitation</b>The mapping is correct only for points <b>on the ground</b>: a player's feet and a bouncing ball. A ball in the air projected with the same mapping lands at the wrong place (usually much farther away). This is why the review found a “bounce” 39 m outside the court — it was a ball in the air.</div>
+</section>
+
+<!-- ================================================================ 6 -->
+<section>
+<h2>6. Step 2 – Ball tracking</h2>
+<p><b>Model: TrackNetV3</b> (checkpoint from the RacketVision research project). It is a neural network designed for small, fast balls in sports video. We use it as published — we did not train it.</p>
+<h3>How it works</h3>
+<ol>
+  <li>Input: the background image + the 4 latest frames, each resized to 512×288 (15 colour channels in total).</li>
+  <li>Output: a <b>heat map</b> the size of the input, where each pixel has a value 0–1 = “how likely the ball centre is here”.</li>
+  <li>Pixels above 0.5 are kept; the <b>largest connected blob</b> is the ball. Its centre is scaled back to the original 1920×1080 pixels. Confidence = mean heat-map value in the blob.</li>
+  <li>No blob above 0.5 → the ball is “not seen” in that frame.</li>
+</ol>
+<h3>How it runs</h3>
+<ul>
+  <li>On the GPU (Apple “MPS” on the Mac, CUDA on NVIDIA), 8 frames per batch.</li>
+  <li>The video is processed in 120-second segments, each in its own process, so memory stays bounded for long matches (a memory leak on the Mac GPU was found and fixed this way).</li>
+  <li>Output: <code>ball.json</code> = one entry per frame: <code>[x, y, confidence]</code> or empty.</li>
+</ul>
+<figure><img src="fig/ball_track.jpg"><figcaption>Ball positions (magenta, frame numbers every 6 frames) over ~3 seconds of test 1: Blue's shot bounces in Orange's court (frame 1008), Orange plays a high defensive ball back.</figcaption></figure>
+<h3>How good it is</h3>
+<p>In test 1 the ball was found in <b>1,469 of 1,800 frames (82 %)</b>. During rallies it is very reliable. Known weaknesses seen in the review:</p>
+<ul>
+  <li>It can lock onto <b>another ball lying or rolling on the court</b> (spare balls), jumping between the real ball and the still one.</li>
+  <li>When the ball is <b>hidden</b> (behind a player's head or body, or the net band) there is a gap; if the gap is exactly at a bounce, the bounce is lost.</li>
+  <li>It sometimes picks up balls on the <b>neighbouring court</b>.</li>
+</ul>
+</section>
+
+<!-- ================================================================ 7 -->
+<section>
+<h2>7. Step 3 – Player detection and body pose</h2>
+<p>Two pretrained models from the OpenMMLab family, run with ONNX Runtime on the CPU (so they can run in parallel with the ball tracker on the GPU):</p>
+<table>
+<tr><th>Model</th><th>Job</th><th>Input size</th></tr>
+<tr><td><b>YOLOX-tiny</b> (person detector)</td><td>Finds a box around every person</td><td>416×416</td></tr>
+<tr><td><b>RTMPose-s</b> (pose model)</td><td>Finds 17 body points inside each box: nose, eyes, ears, shoulders, elbows, <b>wrists</b>, hips, knees, ankles — each with a confidence</td><td>192×256 per person</td></tr>
+</table>
+<h3>How it works</h3>
+<ol>
+  <li><b>Full frame pass</b>: finds the near player (large) and usually the far player.</li>
+  <li><b>Far-court tiles</b>: the far half of the court is cut into 2 overlapping tiles (placed using the calibration) and each tile is run through the detector separately. The far player is then about twice as large at the detector input, so he is found much more reliably. Boxes that touch a tile edge are dropped (they are cut-off pieces of the near player).</li>
+  <li>Duplicates are merged (non-maximum suppression), and a box mostly inside a larger box is removed (arm/leg detections).</li>
+  <li><b>Court filter</b>: the middle of the bottom edge of each box = the feet. The feet are mapped to court metres; only people within the court plus 4 m to the sides and 7 m behind the baselines are kept. This removes spectators and people on neighbouring courts.</li>
+  <li>The pose model runs on the kept boxes.</li>
+</ol>
+<figure><img src="fig/players.jpg"><figcaption>Frame 543 of test 1. Cyan: the two far-court tiles. Orange box = player A (Orange), blue box = player B (Blue), with skeletons and court position in metres. Grey = detected people that are not players (other court, door). Magenta circle = ball.</figcaption></figure>
+<p>For every kept person we store: box, score, court position (x, y metres), and 17 body points. This is <code>pose.json</code>.</p>
+</section>
+
+<!-- ================================================================ 8 -->
+<section>
+<h2>8. Step 4 – Player identity (who is who)</h2>
+<p>Goal: in every frame, know which detected person is <b>player A</b> and which is <b>player B</b> — even after they change ends, when A is suddenly on the far side. This uses no trained model; it is an algorithm that runs over the whole session.</p>
+<ol>
+  <li><b>Remove static objects</b>: things the detector mistakes for people (a door, a bag on a chair) stay at the same pixels for a long time. Any detection whose position and size repeat in at least 15 % of all analysed frames is marked “static” and ignored. Players never stand still that long.</li>
+  <li><b>Tracklets</b>: detections in consecutive frames are linked into short tracks by their court position in metres (predicted from their speed; a match must be within 1.2 m + 0.25 m per missing frame). A tracklet ends when the person is lost for more than 8 frames, at a scene cut, or when two detections are almost equally close (we stop rather than guess).</li>
+  <li><b>Player tracklets only</b>: a tracklet must be long enough (≥ 0.3 s), its median position must be within the doubles width ± 0.8 m, and it must be mostly inside the court area including the run-off.</li>
+  <li><b>Appearance</b>: using the pose, we cut out the <b>shirt</b> (shoulders–hips polygon) and <b>shorts</b> (hips–mid-thigh) and compute a colour histogram (hue, saturation, brightness). Each tracklet gets the median of its clean frames (frames where it does not overlap another person).</li>
+  <li><b>Seed</b>: the first frame with exactly one player on each half. The user told us who starts near the camera, so that tracklet is A and the other is B. Their colours become the A and B prototypes.</li>
+  <li><b>Assign</b> (repeated 4 times): each tracklet gets the label whose prototype colour is closer (Bhattacharyya distance). Two tracklets that exist at the same time must have different labels; if not, the less certain one is flipped. Prototypes are then recomputed from confident tracklets.</li>
+  <li><b>Unknown instead of guessing</b>: if a tracklet's colour is almost equally close to A and B (margin &lt; 0.04), it stays unknown.</li>
+  <li><b>Singles completion</b>: if one player is identified in a frame and exactly one other person stands in the playing area on the opposite half, that person is the other player.</li>
+</ol>
+<div class="box good"><b class="t">Results (hand-checked random frames)</b>
+4apx video (21 min, several changeovers): 97.9 % · otJ video (13 min): 94.5 % · MZZ video (13.6 min, held out): 95.2 %. <b>Zero swaps</b> (A never labelled as B) in all three; the remaining misses are frames labelled “unknown”.</div>
+<p class="small">Why it generalises: it relies only on court metres (from calibration) and clothing colours measured in the same video, not on any training. It would fail if both players wear the same colours — then it would mostly return “unknown” rather than swap.</p>
+</section>
+
+<!-- ================================================================ 9 -->
+<section>
+<h2>9. Step 5 – Hit and bounce detection</h2>
+<p>A <b>hit</b> or a <b>bounce</b> shows up in the ball track as a sudden change of the ball's motion: it changes direction, speed, or both. We use a trained classifier that looks at the ball's motion around every frame and outputs three probabilities: <i>nothing</i>, <i>hit</i>, <i>bounce</i>.</p>
+<h3>9.1 Cleaning the ball track</h3>
+<ul>
+  <li>Positions are divided by the image height, so the numbers are the same for any video resolution.</li>
+  <li>An isolated jump (a point far from both neighbours while the neighbours are close to each other) is removed as an outlier. A point with no other detection within ±2 frames is removed.</li>
+  <li>Gaps of up to 6 frames are filled by straight-line interpolation (marked as “not observed”).</li>
+</ul>
+<h3>9.2 The 70 motion features (per frame)</h3>
+<p>For each frame <i>t</i> and for 5 time scales (1, 2, 3, 5 and 8 frames) we compare the motion <b>arriving</b> at t with the motion <b>leaving</b> t:</p>
+<table>
+<tr><th>Feature (× 5 scales)</th><th>Meaning</th></tr>
+<tr><td>velocity before (x, y), velocity after (x, y)</td><td>How the ball moves into and out of this frame</td></tr>
+<tr><td>speed before, speed after, log speed ratio</td><td>Did it suddenly speed up (hit) or slow down (bounce, soft contact)?</td></tr>
+<tr><td>cosine of the angle between the two directions</td><td>Did it change direction? (−1 = reversed)</td></tr>
+<tr><td>acceleration (x, y, size)</td><td>How strong the change is</td></tr>
+<tr><td>vertical flip, change in vertical speed</td><td>A bounce typically reverses the up/down motion in the image</td></tr>
+</table>
+<p>Plus: the “kink” (how far the point at t is from the straight line joining t−3 and t+3), and 3 features saying how many real (not interpolated) observations are around t. Total: 13×5 + 2 + 3 = <b>70 features</b>. Time is normalised to 30 fps so other frame rates work the same.</p>
+<h3>9.3 The classifier</h3>
+<p><b>Model: Histogram Gradient Boosting</b> (a fast decision-tree ensemble from scikit-learn; 400 trees). Trained by us — see section 17. Hits and bounces are rare, so their training examples count 6× more.</p>
+<h3>9.4 From probabilities to events</h3>
+<ul>
+  <li>A frame is an event if its probability is a <b>local peak above 0.5</b>, and no stronger peak of the same kind is within 6 frames.</li>
+  <li>If a hit peak and a bounce peak are within 2 frames, only the stronger one is kept (an event cannot be both).</li>
+</ul>
+<figure><img src="fig/event_probs.png"><figcaption>Test 1, frames 420–720 (10 s). Top: ball height in the image (up = towards the far court). Middle/bottom: the classifier's hit and bounce probabilities. Red and green vertical lines = hits and bounces in the final report. Every V-shape at the bottom of the top plot is a bounce in the near court; every turn at the top is a hit by the far player.</figcaption></figure>
+<div class="box"><b class="t">Why it works without player information</b>The classifier uses only the ball's motion, so it does not care which player or court it is. That is also its limit: a ball dropped and bounced by a player before a serve looks like a real bounce, and a ball flying past a player looks similar from the camera. The clean-up rules in the next step exist to handle that.</div>
+</section>
+
+<!-- ================================================================ 10 -->
+<section>
+<h2>10. Step 6 – Clean-up rules after detection</h2>
+<p>The raw events go through these rules, in this order. For each rule, the test-1 numbers show what it did.</p>
+<table>
+<tr><th>#</th><th>Rule</th><th>Detail</th><th>Test 1</th></tr>
+<tr><td>1</td><td><b>Slow ball = not in play</b></td><td>Ball speed around the event (median over ±8 frames, converted to m/s on the court plane) below 5 m/s (18 km/h) → removed. Catches dribbling, rolling balls, balls lying on court.</td><td>3 hits, 3 bounces removed</td></tr>
+<tr><td>2</td><td><b>One contact, one hit</b></td><td>Two hit peaks less than 10 frames apart are one contact; the stronger is kept.</td><td>–</td></tr>
+<tr><td>3</td><td><b>Rally logic adds missing hits</b></td><td>Bounces are detected more reliably than hits. A bounce on side S followed (within 4 s) by a bounce on the other side means the player on side S hit in between; the first bounce of a point (after a 4-s pause) means the other side hit just before (within 2 s). The missing hit is placed where that player's wrist is closest to the ball.</td><td>2 hits added (f477 ✓, f948 ✗ — was Blue catching the ball)</td></tr>
+<tr><td>4</td><td><b>Someone must be in reach</b></td><td>A hit needs a person whose wrist is within 1.5 “reach units” of the ball (see step 7), else removed.</td><td>6 removed — including <b>two real far-player hits (f1319, f1674)</b></td></tr>
+<tr><td>5</td><td><b>No two hits in a row by the same player</b></td><td>If the same player seems to hit twice within 1.5 s, the earlier one (ball toss, feed, catch) is removed.</td><td>1 removed</td></tr>
+</table>
+<div class="box warn"><b class="t">Lesson from the review</b>Rule 4 measures reach in <i>image</i> units relative to the player's height in the image. For the far player (small in the image) this is unreliable — real far-player hits were removed, while a ball flying past him counted as a hit. Fixing this is one of the two main improvements (section 20, B).</div>
+<p class="small">Two older rules (“ball handling” and a rally-validity check) were switched off on 28 Sep 2026 because on the labelled videos they also removed real shots into the net. They are replaced by rule 1 for now and will be replaced by the rally state machine (section 20, A).</p>
+</section>
+
+<!-- ================================================================ 11 -->
+<section>
+<h2>11. Step 7 – Who hit the ball</h2>
+<p>For each hit frame, over ±4 frames, we measure for <b>every detected person</b> how close their nearest wrist is to the ball:</p>
+<div class="formula">reach = (distance ball ↔ nearest wrist, in pixels) / (0.45 × person's box height in pixels)
+
+(no wrist visible → distance to the box centre / (0.6 × box height))</div>
+<p>0.45 × body height is roughly the length of an arm plus racket. The person with the smallest reach is the hitter, if that value is ≤ 1.5. If the closest person has no A/B identity, the hitter is “unknown” (we do not fall back to the other player).</p>
+<figure class="nobreak">
+<svg viewBox="0 0 760 210" width="100%" role="img" aria-label="Why image-based reach fails">
+  <rect x="0" y="0" width="760" height="210" fill="#f7f7f7" stroke="#ddd"/>
+  <rect x="330" y="30" width="12" height="36" fill="#3b6fd8"/><text x="350" y="46" font-size="12">far player (40 px tall)</text>
+  <circle cx="324" cy="44" r="5" fill="#c8e02a" stroke="#555"/>
+  <text x="200" y="90" font-size="12">ball in the air, 8 m in front of him,</text>
+  <text x="200" y="106" font-size="12">but in the image only ~10 px from his wrist</text>
+  <text x="200" y="122" font-size="12">→ reach = 10 / (0.45×40) = 0.6  → counted as his hit ✗</text>
+  <rect x="580" y="60" width="60" height="140" fill="#e07a2c"/><text x="520" y="54" font-size="12">near player (250 px tall)</text>
+  <text x="440" y="160" font-size="12">1.5 reach = 170 px</text>
+  <text x="440" y="176" font-size="12">very tolerant for the near player</text>
+</svg>
+<figcaption>Same rule, very different meaning for the near and the far player. This is why the hitter will be decided in court metres and from the ball's direction (section 20, B).</figcaption>
+</figure>
+<p>The report also records the reach value of each shot (“attribution distance”), so the confidence of each attribution can be inspected.</p>
+</section>
+
+<!-- ================================================================ 12 -->
+<section>
+<h2>12. Step 8 – Stroke type</h2>
+<p>Rules on the hitter's body points around the contact frame (validated on 27 hand-labelled shots). They are checked in this order:</p>
+<ol>
+  <li><b>Serve</b>: a wrist is above the head (face/ear points) in the 4 frames before contact, and the player is within 1.2 m of (or behind) their own baseline.</li>
+  <li><b>Overhead</b>: a wrist above the head anywhere else on court.</li>
+  <li><b>Volley</b>: no bounce since the previous shot and the player is within 7 m of the net.</li>
+  <li><b>Forehand / backhand</b>: from the <b>follow-through</b>. We take the racket-hand wrist (right wrist for a right-hander) 4–12 frames after contact and measure where it is relative to the hip centre, in body heights. A forehand finishes across the body (on the non-racket side), a backhand finishes on the racket side. The near player is seen from behind (his left = image left); the far player faces the camera, so the sign is flipped. Left-handers are flipped again.</li>
+  <li>No usable body points → <b>unknown</b>.</li>
+</ol>
+<p>Handedness comes from the session setup (default right). The system also counts which arm goes up on serves and reports it as a hint.</p>
+<div class="box warn"><b class="t">Known weaknesses</b>Two-handed backhands end with both hands over the right shoulder, which the one-wrist rule can read as a forehand. For the far player (50 px tall) the wrist positions are noisy, so strokes are often “unknown”. If the hit frame is late, the follow-through window is wrong.</div>
+</section>
+
+<!-- ================================================================ 13 -->
+<section>
+<h2>13. Step 9 – Landing position, region and in/out</h2>
+<ol>
+  <li>The <b>first bounce</b> of a shot = the first detected bounce more than 2 frames after the hit, before the next hit, and within 3.5 s.</li>
+  <li>The ball's pixel position at that bounce is mapped to court metres with the calibration (a bouncing ball is on the ground, so this is valid).</li>
+  <li>The point is placed in the <b>opponent's singles half</b>, seen from the hitter's side:</li>
+</ol>
+<div class="two">
+<svg viewBox="0 0 330 330" width="100%" role="img" aria-label="Landing regions">
+  <rect x="40" y="20" width="250" height="280" fill="#2f7a5a"/>
+  <line x1="40" y1="20" x2="290" y2="20" stroke="#fff" stroke-width="3"/>
+  <line x1="40" y1="300" x2="290" y2="300" stroke="#fff" stroke-width="4" stroke-dasharray="6 4"/>
+  <line x1="40" y1="20" x2="40" y2="300" stroke="#fff" stroke-width="3"/><line x1="290" y1="20" x2="290" y2="300" stroke="#fff" stroke-width="3"/>
+  <line x1="40" y1="149" x2="290" y2="149" stroke="#fff" stroke-width="3"/>
+  <line x1="123" y1="20" x2="123" y2="300" stroke="#cde" stroke-width="1" stroke-dasharray="4 3"/>
+  <line x1="207" y1="20" x2="207" y2="300" stroke="#cde" stroke-width="1" stroke-dasharray="4 3"/>
+  <g fill="#fff" font-size="12" text-anchor="middle">
+    <text x="82" y="85">deep</text><text x="82" y="100">left</text>
+    <text x="165" y="85">deep</text><text x="165" y="100">centre</text>
+    <text x="248" y="85">deep</text><text x="248" y="100">right</text>
+    <text x="82" y="222">short</text><text x="82" y="237">left</text>
+    <text x="165" y="222">short</text><text x="165" y="237">centre</text>
+    <text x="248" y="222">short</text><text x="248" y="237">right</text>
+  </g>
+  <text x="165" y="14" text-anchor="middle" font-size="11">opponent's baseline</text>
+  <text x="165" y="318" text-anchor="middle" font-size="11">net (hitter is on this side, looking up)</text>
+</svg>
+<div>
+<p><b>Short</b> = between the net and the service line (6.40 m from the net); <b>deep</b> = between the service line and the baseline. <b>Left / centre / right</b> = the singles width (8.23 m) split in three, as seen by the hitter.</p>
+<p><b>Status</b>:</p>
+<ul>
+  <li><b>in</b> — inside the singles half;</li>
+  <li><b>in_near_line</b> — within 0.15 m of a line (too close to call with confidence);</li>
+  <li><b>out</b> — beyond a sideline or baseline by more than 0.15 m;</li>
+  <li><b>hitter_half</b> — landed on the hitter's own side (net ball, or a wrong hitter);</li>
+  <li>no bounce before the next hit (volleyed), or not observed.</li>
+</ul>
+<p>Percentages in the report use an explicit denominator: shots with a detected first bounce inside the opponent's singles half.</p>
+</div>
+</div>
+<div class="box warn"><b class="t">Accuracy of the bounce position</b>Near court: a few centimetres per pixel — good. Far court: one pixel is 10–20 cm, and the bounce frame can be off by one frame, so near the far baseline the in/out call has an uncertainty of roughly ±0.5 m. The review found one “out by 0.38 m” that is therefore uncertain.</div>
+</section>
+
+<!-- ================================================================ 14 -->
+<section>
+<h2>14. Step 10 – Ball speed</h2>
+<p>With one camera we cannot measure the ball's height in the air, so we cannot measure its true 3-D speed at every moment. What we can measure precisely are two points <b>on the ground</b>: where the hitter stands (his feet, from pose + calibration) and where the ball bounced. So we report:</p>
+<div class="formula">average speed (km/h) = distance on the ground (m) / flight time (s) × 3.6
+
+distance  = straight line from the hitter's feet (court metres) to the first-bounce point (court metres)
+flight time = (bounce frame − hit frame) / frames per second</div>
+<h4>Worked example (test 1, Orange's forehand at frame 544)</h4>
+<div class="formula">Orange's feet at contact: (4.84, 24.01) m; the ball bounces at (8.24, 3.58) m
+distance = √(3.40² + 20.43²) = 20.71 m
+flight time = (570 − 544) / 30 = 0.867 s
+speed = 20.71 / 0.867 × 3.6 = 86.0 km/h          (report: 86.0 km/h)</div>
+<h4>Plausibility checks</h4>
+<p>A speed is only reported if the flight time is more than 0.15 s, the distance is between 3 and 32 m, and the result is at most 230 km/h. Otherwise the hit–bounce pair is probably wrong and no speed is given.</p>
+<div class="box"><b class="t">What this number is — and is not</b>It is the <b>average horizontal speed over the whole flight</b>, from racket to bounce. It is <b>lower than a radar gun</b> reading (a radar measures the peak speed right after the racket; air drag slows the ball by 20–40 % before it lands). It is consistent between shots and players, so it is good for comparing, but it is not “speed off the racket”. Serve speed uses the same definition.</div>
+<div class="box bad"><b class="t">Seen in the review</b>If the hitter is wrong (the other player) or the bounce is paired with the wrong shot, the distance is wrong and the speed becomes nonsense (e.g. 10 km/h). Fixing hitter attribution fixes these speeds too.</div>
+<h4>A second speed, used internally</h4>
+<p>For the “slow ball = not in play” rule (section 10), the ball's speed around an event is estimated from its image motion frame to frame, converted to m/s using the court scale at that image position. This is only a rough speed (the ball is not on the ground) and is used only as a threshold (5 m/s).</p>
+</section>
+
+<!-- ================================================================ 15 -->
+<section>
+<h2>15. Step 11 – The report, the app, and corrections</h2>
+<p><code>report.json</code> contains, per player: number of shots; stroke counts (serve, forehand, backhand, volley, overhead, unknown); landing counts and percentages for the six regions, outs and shots without an observed bounce; median and maximum average speed and median serve speed. It also contains every shot (frame, time, player, side, stroke with the evidence used, landing, speed) and every event, including which ones the clean-up rules removed and why.</p>
+<figure><img src="../app_screens.jpg" style="max-height:120mm; width:auto; max-width:100%"><figcaption>The Flutter app (Android build tested on the emulator against the Mac server): sessions, court setup, progress, report.</figcaption></figure>
+<h3>Shot editor → corrections → training labels</h3>
+<p>In the app, each shot can be watched and corrected: change the player, change the stroke, delete it, or add a missed shot at the current video time. The server stores these corrections separately, recomputes the report with them, and keeps them as labelled examples. Over time this becomes our own training and test data from real phone recordings.</p>
+</section>
+
+<!-- ================================================================ 16 -->
+<section>
+<h2>16. All models used</h2>
+<table>
+<tr><th>Model</th><th>What for</th><th>Trained on</th><th>Trained by us?</th><th>Runs on</th></tr>
+<tr><td><b>TrackNetV3</b> (RacketVision checkpoint)</td><td>Ball position in every frame</td><td>RacketVision dataset (broadcast racket sports)</td><td>No (used as published)</td><td>GPU (Mac MPS / NVIDIA CUDA)</td></tr>
+<tr><td><b>YOLOX-tiny</b></td><td>Person boxes</td><td>COCO + HumanArt (OpenMMLab)</td><td>No</td><td>CPU (ONNX Runtime)</td></tr>
+<tr><td><b>RTMPose-s</b> (Body7)</td><td>17 body points per person</td><td>7 public human-pose datasets (OpenMMLab)</td><td>No</td><td>CPU (ONNX Runtime)</td></tr>
+<tr><td><b>Event classifier</b> (Histogram Gradient Boosting, 70 features, 3 classes) — <code>models/event_model.pkl</code></td><td>Hit / bounce / nothing per frame</td><td>TrackNet tennis dataset (10 broadcast games, 19,835 frames, tracker output) + 3,000 simulated phone-view rallies</td><td><b>Yes</b></td><td>CPU (milliseconds)</td></tr>
+<tr><td>Court calibration</td><td>Pixels ↔ metres</td><td>— (geometry, no learning)</td><td>—</td><td>CPU</td></tr>
+<tr><td>Identity</td><td>A / B per frame</td><td>— (per-video clustering of clothing colours)</td><td>—</td><td>CPU</td></tr>
+<tr><td>Stroke, landing, speed</td><td>Rules on pose and geometry</td><td>— (rules, thresholds chosen on dev labels)</td><td>—</td><td>CPU</td></tr>
+</table>
+<h3>Built but not active</h3>
+<table>
+<tr><th>Model</th><th>Status</th></tr>
+<tr><td>Hit model with body features (ball + wrist/body geometry), <code>hit_model_body_experimental.pkl</code></td><td>Trained on TrackNet clips with pose. It did not improve our amateur phone labels, so it is switched off (can be enabled with <code>LT_HIT_MODEL</code>).</td></tr>
+<tr><td>Small “student” ball tracker for phones (distilled from TrackNetV3)</td><td>Built for on-phone processing; not needed now that analysis runs on the server.</td></tr>
+<tr><td>Other ball trackers tried (WASB, yastrebksv TrackNet), yastrebksv court detector</td><td>Evaluated; court detector fails on low amateur views (confuses the net with the far baseline). Not used.</td></tr>
+</table>
+<p class="small">Licensing was deferred by the project owner for now; the origin of every model and dataset is recorded in <code>THIRD_PARTY.md</code> and <code>data/public/SOURCES_V2.md</code> so it can be cleared or replaced before a commercial release.</p>
+</section>
+
+<!-- ================================================================ 17 -->
+<section>
+<h2>17. Do we train our own models?</h2>
+<p><b>Yes — one model today: the hit/bounce classifier.</b> The large vision models (ball, people, pose) are used as published; they are general and already good. What is specific to our problem is <i>interpreting</i> the ball's motion, and that we train ourselves.</p>
+<h3>Training the hit/bounce classifier</h3>
+<ol>
+  <li><b>Real data</b>: the public TrackNet tennis dataset — 10 broadcast games, 95 clips, 19,835 frames, with the ball position and a label for every frame (1 = hit, 2 = bounce). We run <i>our</i> ball tracker on these clips and train on its output (not on the perfect labels), so the classifier learns to cope with real tracker errors.</li>
+  <li><b>Simulated phone data</b>: broadcast cameras are high and far; our phone is low and behind the baseline, so the same shot looks different. We therefore <b>simulate 3,000 rallies</b> with real ball physics — gravity, air drag, topspin/slice (Magnus effect), bounce with energy loss and friction, net clearance — and film them with randomly placed virtual phone cameras (different heights, distances, lens angles 55–85°). The simulated tracks are then corrupted like the real tracker (jitter, missed frames that grow with speed, outliers). Dead-ball activity (dribbling before a serve, rolling balls) is simulated as negative examples.</li>
+  <li><b>Labels</b>: the event frame ±1 frame is marked as the event.</li>
+  <li><b>Training</b>: Histogram Gradient Boosting, 400 trees, events weighted 6× (they are rare).</li>
+  <li><b>Checking</b>: leave-one-game-out on TrackNet (train on 9 games, test on the 10th), and the amateur phone-view labels (section 18).</li>
+</ol>
+<h3>What we will train next</h3>
+<ul>
+  <li><b>Fine-tune the event classifier on real amateur phone video</b>: the frame-by-frame review of test 1 plus exhaustive labels of tests 2 and 3, and later the corrections users make in the app. Rules stay as a safety net.</li>
+  <li><b>A stroke classifier</b> on the sequence of body points around contact (instead of one follow-through rule), trained on our labelled shots (and THETIS stroke data for forehand/backhand shape).</li>
+  <li><b>Ball-tracker fine-tuning</b> on phone footage (spare balls on court, low camera) if gap-bridging and static-ball suppression are not enough.</li>
+</ul>
+<div class="box"><b class="t">The rule for any training</b>Labels used to train or tune are never the labels used to report accuracy. Every labelled video is marked <i>dev</i> (allowed for tuning) or <i>held-out</i> (only for measuring).</div>
+</section>
+
+<!-- ================================================================ 18 -->
+<section>
+<h2>18. How we measure accuracy</h2>
+<h3>The regression suite</h3>
+<p><code>eval/run.py</code> runs the engine on every labelled video and writes the results to <code>docs/RESULTS.md</code>. It is run after every change; a change that makes any number worse needs a stated reason.</p>
+<h3>Labels we have</h3>
+<table>
+<tr><th>Video</th><th>What is labelled</th><th>Split</th></tr>
+<tr><td>4apx — amateur indoor match, 21 min, changeovers</td><td>Identity on 96 frames; all hits and bounces in 2 × 12-s windows, with hitter and stroke</td><td>dev</td></tr>
+<tr><td>otJ — amateur indoor, low camera, 13 min</td><td>Identity on 73 frames</td><td>dev</td></tr>
+<tr><td>MZZ — amateur indoor, SwingVision-style view, 13.6 min</td><td>Identity on 83 frames; all hits and bounces in 3 × 12-s windows</td><td>held-out</td></tr>
+<tr><td>TrackNet broadcast (10 games)</td><td>Every frame: ball, hit, bounce</td><td>leave-one-game-out</td></tr>
+<tr><td>Test 1 (60 s from MZZ)</td><td>Frame-by-frame review of all 56 system events + missed events (this project, 29 Sep)</td><td>review</td></tr>
+</table>
+<h3>How a detection is counted</h3>
+<ul>
+  <li>A detected event matches a labelled event of the same kind if it is within <b>±3 frames</b> (0.1 s); each label can match only once.</li>
+  <li><b>Precision</b> = correct detections / all detections (how many of our events are real).</li>
+  <li><b>Recall</b> = correct detections / all real events (how many real events we found).</li>
+  <li><b>F1</b> = the balance of the two (1.0 = perfect).</li>
+</ul>
+<h3>Current numbers</h3>
+<table>
+<tr><th>Benchmark</th><th>Split</th><th>Result</th></tr>
+<tr><td>Identity 4apx / otJ / MZZ</td><td>dev / dev / held-out</td><td>97.9 % / 94.5 % / 95.2 %, 0 swaps</td></tr>
+<tr><td>Events 4apx</td><td>dev</td><td>hits P 0.75 R 0.92 (F1 0.83); bounces P 0.73 R 1.0 (F1 0.84); hitter 11/12; stroke 6/11</td></tr>
+<tr><td>Events MZZ</td><td>held-out</td><td>hits P 0.60 R 0.38 (F1 0.46); bounces P 0.67 R 1.0 (F1 0.80); hitter 6/6; stroke 4/6</td></tr>
+</table>
+<p>The gap between dev (0.83) and held-out (0.46) for hits shows that the hit rules were tuned too much to one video. Bounces generalise well. This is exactly what the next improvements target.</p>
+</section>
+
+<!-- ================================================================ 19 -->
+<section>
+<h2>19. What the frame-by-frame review of test 1 showed</h2>
+<p>Every one of the 56 events the system produced (28 hits, 28 bounces) was checked against the video frames, and the whole ball path was scanned for missed events. The review PDF (<code>test1_frame_review.pdf</code>) has one page per event; the project owner checked it and agreed with every verdict.</p>
+<table>
+<tr><th></th><th>Correct</th><th>Partly</th><th>Wrong</th><th>Missed</th></tr>
+<tr><td>Hits (28)</td><td>15</td><td>9</td><td>4</td><td>4 (+2 at the wrong moment)</td></tr>
+<tr><td>Bounces (28)</td><td>21</td><td>3</td><td>4</td><td>2</td></tr>
+</table>
+<figure><img src="fig/event_strip.jpg"><figcaption>One review strip (event 21: Orange forehand, correct): frames −6, −3, event, +3, +6 zoomed on the ball, and the full frame with the ball path.</figcaption></figure>
+<h3>What works</h3>
+<p>Ball tracking and bounce detection during rallies; player identity (never swapped); near-player hits and strokes.</p>
+<h3>What goes wrong — the same few causes repeat</h3>
+<table>
+<tr><th>Cause</th><th>Examples in test 1</th></tr>
+<tr><td><b>No idea when the ball is in play.</b> Catching, dribbling and feeding the ball back between points become hits and bounces. In this clip nobody serves overhead: every point starts with a drop-hit, and twice the “catch” was taken as the hit while the real drop-hit was missed.</td><td>7 wrong/partly events; 3 point-starting shots missed or mistimed</td></tr>
+<tr><td><b>Hitter decided in image pixels.</b> A ball flying past the small far player counted as his hit; a real far-player hit was given to the near player; two real far-player hits were deleted by the reach rule.</td><td>Events 13, 15; removed f1319, f1674; the wrong hitter pushes landings onto the wrong shot (“hitter_half”) and gives 10 km/h speeds</td></tr>
+<tr><td><b>No physical sanity checks.</b> A high volley at the net was called a bounce and placed 39 m outside the court.</td><td>Event 39</td></tr>
+<tr><td><b>Tracker distractions.</b> A spare ball on the court pulled the tracker away; the near player's head hid the ball exactly at a bounce.</td><td>2 missed bounces (f775, f1718)</td></tr>
+<tr><td><b>Stroke and timing.</b> Two-handed backhands read as forehands (and the reverse); one hit 11 frames late.</td><td>Events 12, 38, 55; event 25</td></tr>
+</table>
+</section>
+
+<!-- ================================================================ 20 -->
+<section>
+<h2>20. What we will improve, and how</h2>
+<p>Every change must follow tennis rules or physics that hold for <b>any</b> video from this camera position — no thresholds tuned to one clip. Order: A and B first (most errors, and they cause the wrong-landing chain), then C, D, E, F.</p>
+
+<h3>A. Rally state machine — know when the ball is in play</h3>
+<ul>
+  <li>A point <b>starts</b> with the first shot that crosses the net and lands in the opponent's court — serve, drop-hit or feed. We do not assume a serve.</li>
+  <li>A point <b>ends</b> on: ball out, ball in the net, second bounce on one side, or no activity for a few seconds.</li>
+  <li>Everything between points (catching, dribbling, feeding back, picking up) is tagged <b>dead ball</b>: kept for display, excluded from statistics.</li>
+  <li><b>Dribble pattern</b>: repeated small bounces next to one standing player, ball never crossing the net → dead ball.</li>
+  <li>A hit is accepted only if the ball's direction afterwards points to the other half.</li>
+</ul>
+<p class="small">Expected effect on test 1: removes the 7 dead-ball events and finds the 3 real point starts.</p>
+
+<h3>B. Decide the hitter in court metres, not image pixels</h3>
+<ul>
+  <li><b>Main signal: ball direction after contact.</b> With the camera behind the near baseline, a ball moving away from the camera (up in the image) after contact was hit by the near player; towards the camera by the far player. This does not depend on player size.</li>
+  <li>The hitter must be on the side of the net where the ball is (from the trajectory and the player's feet in metres).</li>
+  <li>Players must alternate (except after a net ball or a new point).</li>
+  <li>Wrist reach is only a tie-breaker, and is measured in <b>metres</b> using the court scale at the player's feet.</li>
+  <li>The “someone in reach” rule (section 10, rule 4) is changed to use metres, so real far-player hits (like f1319 and f1674) are no longer deleted.</li>
+</ul>
+<p class="small">Expected effect: fixes events 13 and 15, recovers the two deleted far-player hits, and fixes the landing and speed errors that follow a wrong hitter.</p>
+
+<h3>C. Physical sanity checks</h3>
+<ul>
+  <li>A bounce must map onto the court area (about −3 to 27 m); anything else is a contact in the air (volley, overhead).</li>
+  <li>A bounce on the hitter's own side right after his hit is only possible for a net ball.</li>
+  <li>No two hits without the ball crossing the net or bouncing in between.</li>
+  <li>Speeds outside a realistic range for a rally shot mark the event as suspicious.</li>
+</ul>
+
+<h3>D. Ball-tracker robustness</h3>
+<ul>
+  <li><b>Static-ball suppression</b>: a “ball” that stays still or rolls slowly on the ground is ignored (same idea as the static-people filter that fixed doors and bags).</li>
+  <li><b>Gap bridging</b>: fit the flight arc before and after a gap; if they meet at ground level, add the bounce there.</li>
+  <li><b>Trajectory consistency</b>: keep only detections that fit a smooth flight (no jumps to another object or the next court).</li>
+</ul>
+
+<h3>E. Contact time and stroke</h3>
+<ul>
+  <li>Contact frame = the frame where the ball's direction actually changes (refined after detection).</li>
+  <li>Forehand/backhand from the side of the body the ball is on at contact (with handedness) plus the follow-through, including a two-handed backhand pattern (both wrists together, finishing over the racket-side shoulder).</li>
+  <li>Far player too small to judge → “unknown” instead of a guess.</li>
+</ul>
+
+<h3>F. Landing linking</h3>
+<p>Each shot's landing = its first valid bounce on the opponent's side. This becomes correct automatically once A–C are in place.</p>
+</section>
+
+<!-- ================================================================ 21 -->
+<section>
+<h2>21. Test plan: making it work for any video</h2>
+<ol>
+  <li><b>Three test videos, fully labelled.</b> Test 1 (60 s, from MZZ) is already reviewed. Tests 2 (90 s, from 4apx) and 3 (30 s) will get the same frame-by-frame review with the review tool, giving exhaustive labels: every hit (frame, player, stroke), every bounce (frame, position), dead-ball periods, and point starts/ends.</li>
+  <li><b>One change at a time.</b> After each improvement (A, B, …) we re-run all three test videos and the full regression suite (4apx, otJ, MZZ, TrackNet).</li>
+  <li><b>Accept only if nothing gets worse</b> on any video, and the held-out numbers improve. The dev/held-out gap for hits (0.83 vs 0.46 today) must shrink — that is the sign of real generalisation.</li>
+  <li><b>New review PDF after each fix</b>, so improvements and new errors can be checked by eye.</li>
+  <li><b>New videos</b> (other courts, outdoor, different camera heights) are added as held-out tests as they become available, including recordings made with the app.</li>
+</ol>
+<h3>Targets for the next round</h3>
+<table>
+<tr><th>Metric</th><th>Today (held-out MZZ)</th><th>Target</th></tr>
+<tr><td>Hit F1</td><td>0.46</td><td>≥ 0.80</td></tr>
+<tr><td>Bounce F1</td><td>0.80</td><td>≥ 0.90</td></tr>
+<tr><td>Hitter correct</td><td>6/6 (test 1 review: 1 real hit given to the wrong player, 1 false hit)</td><td>≥ 97 %</td></tr>
+<tr><td>Dead-ball events counted as shots</td><td>7 in 60 s (test 1)</td><td>0–1</td></tr>
+<tr><td>Identity</td><td>95 %, 0 swaps</td><td>keep</td></tr>
+</table>
+</section>
+
+<!-- ================================================================ 22 -->
+<section>
+<h2>22. Glossary</h2>
+<table>
+<tr><td><b>Frame</b></td><td>One picture of the video. 30 fps = 30 frames per second; frame 544 = 18.13 s.</td></tr>
+<tr><td><b>Homography</b></td><td>A mapping between a flat surface (the court floor) and the image. Exact for points on the ground.</td></tr>
+<tr><td><b>Calibration</b></td><td>Finding the homography for a video, from 4 user markers plus automatic line snapping.</td></tr>
+<tr><td><b>Median background</b></td><td>For each pixel, the middle value over many frames — moving players and ball disappear.</td></tr>
+<tr><td><b>Heat map</b></td><td>The ball tracker's output: an image where bright = “ball likely here”.</td></tr>
+<tr><td><b>Keypoints / pose</b></td><td>17 body points (nose, eyes, ears, shoulders, elbows, wrists, hips, knees, ankles) found by the pose model.</td></tr>
+<tr><td><b>Tracklet</b></td><td>A short piece of one person's path, linked frame to frame, before we know who it is.</td></tr>
+<tr><td><b>Near / far player</b></td><td>The player on the camera's side of the net / the other side. Changes at changeovers; A/B does not.</td></tr>
+<tr><td><b>Event</b></td><td>A hit or a bounce, at a specific frame.</td></tr>
+<tr><td><b>Dead ball</b></td><td>Ball activity outside a point: catching, dribbling, feeding back, picking up.</td></tr>
+<tr><td><b>Reach unit</b></td><td>0.45 × a person's height — roughly arm plus racket. Used to decide who is close enough to have hit.</td></tr>
+<tr><td><b>Gradient boosting</b></td><td>A machine-learning method that combines hundreds of small decision trees; fast and good for tabular features.</td></tr>
+<tr><td><b>Synthetic data</b></td><td>Training examples produced by a physics simulation instead of real video.</td></tr>
+<tr><td><b>Precision / Recall / F1</b></td><td>How many detections are right / how many real events were found / the balance of both.</td></tr>
+<tr><td><b>Dev / held-out</b></td><td>Labels we may use to tune the system / labels used only to measure it honestly.</td></tr>
+<tr><td><b>Regression suite</b></td><td>The automatic test run on all labelled videos after every change.</td></tr>
+<tr><td><b>MPS / CUDA</b></td><td>The GPU interfaces of Apple Macs / NVIDIA cards.</td></tr>
+<tr><td><b>ONNX Runtime</b></td><td>A fast, portable engine for running neural networks on CPU (and phones).</td></tr>
+</table>
+<p class="small">Source code: <code>pipeline/</code> (engine), <code>server/</code> (server), <code>app/</code> (Flutter app), <code>eval/</code> (tests), <code>scripts/review_pdf.py</code> (review tool), <code>docs/workflow_guide/</code> (this document; figures made by <code>make_figures.py</code> from a real session).</p>
+</section>
+
+</body>
+</html>
