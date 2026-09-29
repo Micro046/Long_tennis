@@ -22,7 +22,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -332,6 +332,36 @@ def put_corrections(sid: str, body: dict):
 @app.get("/api/v1/sessions/{sid}/video", dependencies=[Depends(auth)])
 def video(sid: str):
     return FileResponse(sdir(sid) / "video.mp4", media_type="video/mp4")
+
+
+# ---------------------------------------------------------------------------- downloads (LAN demo)
+DIST = ROOT / "dist"
+
+
+@app.get("/dl", response_class=HTMLResponse)
+def downloads():
+    """Phone-friendly page with the app and test videos (files in dist/)."""
+    def item(p):
+        mb = p.stat().st_size / 1e6
+        return f'<li><a href="/dl/{p.relative_to(DIST).as_posix()}">{p.name}</a> ({mb:.0f} MB)</li>'
+    apks = sorted(DIST.glob("*.apk"))
+    vids = sorted((DIST / "test_videos").glob("*.mp4"))
+    return f"""<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Long Tennis downloads</title><body style="font-family:sans-serif;max-width:640px;margin:auto;padding:16px">
+<h2>Long Tennis prototype</h2>
+<h3>1. App</h3><ul>{''.join(item(p) for p in apks)}</ul>
+<p>Open the downloaded file and allow installing apps from this browser.</p>
+<h3>2. Test videos</h3><ul>{''.join(item(p) for p in vids)}</ul>
+<p>Download one, then in the app: New session &rarr; Choose video.</p></body>"""
+
+
+@app.get("/dl/{path:path}")
+def download_file(path: str):
+    p = (DIST / path).resolve()
+    if not str(p).startswith(str(DIST.resolve())) or not p.is_file():
+        raise HTTPException(404, "not found")
+    mt = "application/vnd.android.package-archive" if p.suffix == ".apk" else None
+    return FileResponse(p, media_type=mt, filename=p.name)
 
 
 # ---------------------------------------------------------------------------- worker

@@ -18,7 +18,7 @@ class ApiClient {
   final SharedPreferences _prefs;
   late final Dio _dio;
 
-  String get baseUrl => _prefs.getString('baseUrl') ?? 'http://192.168.1.10:8770';
+  String get baseUrl => _prefs.getString('baseUrl') ?? 'http://192.168.18.146:8770';
   String get token => _prefs.getString('token') ?? 'dev-token';
   Future<void> configure(String url, String tok) async {
     await _prefs.setString('baseUrl', url.trim().replaceAll(RegExp(r'/+$'), ''));
