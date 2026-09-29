@@ -352,7 +352,8 @@ def downloads():
 <h3>1. App</h3><ul>{''.join(item(p) for p in apks)}</ul>
 <p>Open the downloaded file and allow installing apps from this browser.</p>
 <h3>2. Test videos</h3><ul>{''.join(item(p) for p in vids)}</ul>
-<p>Download one, then in the app: New session &rarr; Choose video.</p></body>"""
+<p>Download one, then in the app: New session &rarr; Choose video.</p>
+<h3>3. Review reports</h3><ul>{''.join(item(p) for p in sorted(DIST.glob("*.pdf")))}</ul></body>"""
 
 
 @app.get("/dl/{path:path}")
