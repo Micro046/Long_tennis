@@ -53,7 +53,29 @@ def events(b):
     return {k: r[k] for k in ("hits", "bounces", "hitter", "stroke")} | {"details": r["details"]}
 
 
-RUNNERS = {"events": events, "identity": identity, "tracknet_events": tracknet_events}
+def clip_events(b):
+    """A test clip analysed by the server (session dir with ball/pose/calibration); labels use A/B directly."""
+    from pipeline import session as S
+    import eval_amateur as EA
+    d = ROOT / b["session"]
+    meta = json.loads((d / "meta.json").read_text())
+    out = ROOT / "outputs/eval/tmp" / (Path(b["session"]).name + "_report.json")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    stride = 1 if meta.get("quality") == "best" else 3
+    rep = S.run(str(d / "video.mp4"), str(d / "ball.json"), str(d / "pose.json"), str(d / "calibration.json"),
+                os.environ.get("LT_EVENT_MODEL", str(ROOT / "models/event_model.pkl")), str(out),
+                {"A": meta.get("nameA", "A"), "B": meta.get("nameB", "B")}, seed_a_side=meta.get("seedASide", "near"),
+                pose_stride=stride)
+    lab = json.loads((ROOT / b["labels"]).read_text())
+    lab["pidToColour"] = {"A": "A", "B": "B"}
+    r = EA.events_eval(rep, lab)
+    # events inside labelled dead-ball periods (catching, dribbling, feeding) = counted as shots/bounces wrongly
+    dead = [iv for w in lab["windows"] for iv in w.get("deadBall", [])]
+    r["deadBallEvents"] = sum(1 for k in ("hits", "bounces") for e in rep["events"][k] if any(a <= e <= z for a, z in dead))
+    return {k: r[k] for k in ("hits", "bounces", "hitter", "stroke", "deadBallEvents")} | {"details": r["details"]}
+
+
+RUNNERS = {"events": events, "identity": identity, "tracknet_events": tracknet_events, "clip_events": clip_events}
 
 
 def main(kinds):
@@ -62,7 +84,7 @@ def main(kinds):
     for b in bench:
         if kinds and b["kind"] not in kinds:
             continue
-        if not all((ROOT / b[k]).exists() for k in ("video", "pose", "labels", "ball", "calibration") if k in b):
+        if not all((ROOT / b[k]).exists() for k in ("video", "pose", "labels", "ball", "calibration", "session") if k in b):
             results.append({**b, "skipped": "inputs missing"}); continue
         t0 = time.time()
         results.append({**b, "result": RUNNERS[b["kind"]](b), "seconds": round(time.time() - t0)})
@@ -78,11 +100,12 @@ def main(kinds):
         res = r.get("result")
         if r["kind"] == "identity" and res:
             txt = f"{res['correct']} correct / {res['wrong']} wrong / {res['missed']} missed -> **{res['accuracyOfVisible']:.1%}**"
-        elif r["kind"] == "events" and res:
+        elif r["kind"] in ("events", "clip_events") and res:
             h, bo, ht, st = res["hits"], res["bounces"], res["hitter"], res["stroke"]
             txt = (f"hits P {h['precision']} R {h['recall']} (**F1 {h['f1']}**); bounces P {bo['precision']} R {bo['recall']} "
                    f"(**F1 {bo['f1']}**); hitter {ht['correct']}/{ht['correct'] + ht['wrong'] + ht['unknown']}; "
-                   f"stroke {st['correct']}/{st['total']}")
+                   f"stroke {st['correct']}/{st['total']}"
+                   + (f"; dead-ball events {res['deadBallEvents']}" if "deadBallEvents" in res else ""))
         elif r["kind"] == "tracknet_events" and res:
             txt = f"hit F1 **{res['hit']['f1']}** (P {res['hit']['precision']}, R {res['hit']['recall']}); bounce F1 **{res['bounce']['f1']}** (P {res['bounce']['precision']}, R {res['bounce']['recall']})"
         else:

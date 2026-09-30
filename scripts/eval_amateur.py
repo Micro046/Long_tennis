@@ -96,7 +96,7 @@ def events_eval(report, labels, tol=None):
                     pc = colour.get(s["playerId"])
                     key = "unknown" if pc is None else ("correct" if pc == t["player"] else "wrong")
                     out["hitter"][key] += 1
-                    if key == "correct":
+                    if key == "correct" and t.get("stroke"):   # stroke None = not judged by the labeller
                         out["stroke"]["total"] += 1
                         out["stroke"]["correct"] += s["stroke"] == t["stroke"]
                         cm = out["stroke"]["confusion"].setdefault(t["stroke"], {})

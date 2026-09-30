@@ -1,0 +1,321 @@
+{
+ "video": "dist/test_videos/test2_indoor_behind_baseline_90s.mp4",
+ "session": "server/storage/sessions/d1075620",
+ "split": "dev",
+ "annotator": "Claude, 2026-09-30: ball-track timelines (scripts/label_timeline.py) + frame crops (scripts/label_grid.py) + review strips. Serve contacts above the top of the frame are uncertain (timing).",
+ "protocol": "Same as labels_test1.json. Edited video (cuts between points, players change ends at ~f450). A = Frank (red, near at start), B = Tim (grey).",
+ "players": {
+  "A": "Frank",
+  "B": "Tim"
+ },
+ "toleranceFrames": 4,
+ "windows": [
+  {
+   "start": 0,
+   "end": 2698,
+   "hits": [
+    {
+     "frameIndex": 12,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 69,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 161,
+     "player": "A",
+     "stroke": "serve"
+    },
+    {
+     "frameIndex": 189,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 229,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 279,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 312,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 356,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 622,
+     "player": "B",
+     "stroke": "serve",
+     "uncertain": true
+    },
+    {
+     "frameIndex": 655,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 711,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 749,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 794,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 832,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 1016,
+     "player": "B",
+     "stroke": "serve"
+    },
+    {
+     "frameIndex": 1200,
+     "player": "B",
+     "stroke": "serve",
+     "uncertain": true
+    },
+    {
+     "frameIndex": 1381,
+     "player": "B",
+     "stroke": "serve"
+    },
+    {
+     "frameIndex": 1411,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 1457,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 1505,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 1659,
+     "player": "B",
+     "stroke": "serve"
+    },
+    {
+     "frameIndex": 1691,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 1726,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 1786,
+     "player": "A",
+     "stroke": null,
+     "uncertain": true
+    },
+    {
+     "frameIndex": 1940,
+     "player": "B",
+     "stroke": "serve"
+    },
+    {
+     "frameIndex": 2368,
+     "player": "B",
+     "stroke": "serve"
+    },
+    {
+     "frameIndex": 2400,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 2443,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 2605,
+     "player": "B",
+     "stroke": "serve",
+     "uncertain": true
+    },
+    {
+     "frameIndex": 2655,
+     "player": "A",
+     "stroke": null
+    }
+   ],
+   "bounces": [
+    {
+     "frameIndex": 177
+    },
+    {
+     "frameIndex": 222
+    },
+    {
+     "frameIndex": 271
+    },
+    {
+     "frameIndex": 305
+    },
+    {
+     "frameIndex": 355,
+     "uncertain": true
+    },
+    {
+     "frameIndex": 386
+    },
+    {
+     "frameIndex": 643
+    },
+    {
+     "frameIndex": 696
+    },
+    {
+     "frameIndex": 728
+    },
+    {
+     "frameIndex": 786,
+     "uncertain": true
+    },
+    {
+     "frameIndex": 824
+    },
+    {
+     "frameIndex": 849,
+     "uncertain": true
+    },
+    {
+     "frameIndex": 1029
+    },
+    {
+     "frameIndex": 1229
+    },
+    {
+     "frameIndex": 1395
+    },
+    {
+     "frameIndex": 1449
+    },
+    {
+     "frameIndex": 1491
+    },
+    {
+     "frameIndex": 1537,
+     "uncertain": true
+    },
+    {
+     "frameIndex": 1676
+    },
+    {
+     "frameIndex": 1720
+    },
+    {
+     "frameIndex": 1765
+    },
+    {
+     "frameIndex": 1949,
+     "uncertain": true
+    },
+    {
+     "frameIndex": 1959,
+     "uncertain": true
+    },
+    {
+     "frameIndex": 2383
+    },
+    {
+     "frameIndex": 2427
+    },
+    {
+     "frameIndex": 2482
+    },
+    {
+     "frameIndex": 2508
+    },
+    {
+     "frameIndex": 2637
+    },
+    {
+     "frameIndex": 2692
+    }
+   ],
+   "uncertainIntervals": [
+    [
+     0,
+     11
+    ],
+    [
+     13,
+     66
+    ],
+    [
+     70,
+     136
+    ],
+    [
+     1766,
+     1822
+    ]
+   ],
+   "deadBall": [
+    [
+     400,
+     598
+    ],
+    [
+     880,
+     1005
+    ],
+    [
+     1035,
+     1175
+    ],
+    [
+     1232,
+     1375
+    ],
+    [
+     1540,
+     1650
+    ],
+    [
+     1823,
+     1935
+    ],
+    [
+     1965,
+     2362
+    ],
+    [
+     2512,
+     2590
+    ]
+   ]
+  }
+ ]
+}

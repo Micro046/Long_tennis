@@ -1,0 +1,265 @@
+{
+ "video": "dist/test_videos/test1_swingvision_view_1min.mp4",
+ "session": "server/storage/sessions/3ce88198",
+ "split": "dev",
+ "annotator": "Claude, 2026-09-29: frame-by-frame review (review PDF) + ball-track turn-around check of every contact; approved by the project owner.",
+ "protocol": "Exhaustive over the whole clip. Hits = every racket contact while the ball is in play, including point-starting serves/drop-hits and shots into the net. NOT events: catching, dribbling, feeding the ball back between points, touching a ball that is already out. Bounces = ground contacts of a ball in play (first and second bounces). A = Orange (near at start), B = Blue. stroke null = not judged (far player too small or player cut off).",
+ "players": {
+  "A": "Orange",
+  "B": "Blue"
+ },
+ "toleranceFrames": 4,
+ "note": "Overlaps MZZ held-out window 2 (MZZ frames 15843-16186 = test1 frames 6-349): that window is dev from 2026-09-29.",
+ "windows": [
+  {
+   "start": 0,
+   "end": 1800,
+   "hits": [
+    {
+     "frameIndex": 18,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 183,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 218,
+     "player": "A",
+     "stroke": "forehand"
+    },
+    {
+     "frameIndex": 271,
+     "player": "B",
+     "stroke": "forehand"
+    },
+    {
+     "frameIndex": 319,
+     "player": "A",
+     "stroke": "backhand"
+    },
+    {
+     "frameIndex": 377,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 430,
+     "player": "A",
+     "stroke": "backhand"
+    },
+    {
+     "frameIndex": 478,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 544,
+     "player": "A",
+     "stroke": "forehand"
+    },
+    {
+     "frameIndex": 581,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 656,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 689,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 748,
+     "player": "A",
+     "stroke": "forehand"
+    },
+    {
+     "frameIndex": 787,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 847,
+     "player": "A",
+     "stroke": "backhand"
+    },
+    {
+     "frameIndex": 972,
+     "player": "B",
+     "stroke": "forehand"
+    },
+    {
+     "frameIndex": 1033,
+     "player": "A",
+     "stroke": "backhand"
+    },
+    {
+     "frameIndex": 1111,
+     "player": "B",
+     "stroke": "forehand"
+    },
+    {
+     "frameIndex": 1144,
+     "player": "A",
+     "stroke": "volley"
+    },
+    {
+     "frameIndex": 1185,
+     "player": "B",
+     "stroke": "forehand"
+    },
+    {
+     "frameIndex": 1325,
+     "player": "B",
+     "stroke": "forehand"
+    },
+    {
+     "frameIndex": 1386,
+     "player": "A",
+     "stroke": "forehand"
+    },
+    {
+     "frameIndex": 1569,
+     "player": "B",
+     "stroke": "forehand"
+    },
+    {
+     "frameIndex": 1630,
+     "player": "A",
+     "stroke": "forehand"
+    },
+    {
+     "frameIndex": 1672,
+     "player": "B",
+     "stroke": "backhand"
+    },
+    {
+     "frameIndex": 1741,
+     "player": "A",
+     "stroke": "backhand"
+    },
+    {
+     "frameIndex": 1785,
+     "player": "B",
+     "stroke": "backhand"
+    }
+   ],
+   "bounces": [
+    {
+     "frameIndex": 0,
+     "uncertain": true
+    },
+    {
+     "frameIndex": 47
+    },
+    {
+     "frameIndex": 193
+    },
+    {
+     "frameIndex": 252
+    },
+    {
+     "frameIndex": 314
+    },
+    {
+     "frameIndex": 360
+    },
+    {
+     "frameIndex": 416
+    },
+    {
+     "frameIndex": 457
+    },
+    {
+     "frameIndex": 522
+    },
+    {
+     "frameIndex": 570
+    },
+    {
+     "frameIndex": 634
+    },
+    {
+     "frameIndex": 677
+    },
+    {
+     "frameIndex": 775
+    },
+    {
+     "frameIndex": 824
+    },
+    {
+     "frameIndex": 864
+    },
+    {
+     "frameIndex": 1007
+    },
+    {
+     "frameIndex": 1091
+    },
+    {
+     "frameIndex": 1161
+    },
+    {
+     "frameIndex": 1214
+    },
+    {
+     "frameIndex": 1237
+    },
+    {
+     "frameIndex": 1364
+    },
+    {
+     "frameIndex": 1422
+    },
+    {
+     "frameIndex": 1608
+    },
+    {
+     "frameIndex": 1655
+    },
+    {
+     "frameIndex": 1719
+    },
+    {
+     "frameIndex": 1770
+    }
+   ],
+   "uncertainIntervals": [
+    [
+     700,
+     745
+    ],
+    [
+     1423,
+     1440
+    ]
+   ],
+   "deadBall": [
+    [
+     60,
+     175
+    ],
+    [
+     880,
+     965
+    ],
+    [
+     1240,
+     1318
+    ],
+    [
+     1426,
+     1562
+    ]
+   ]
+  }
+ ]
+}

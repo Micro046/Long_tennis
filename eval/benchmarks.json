@@ -43,12 +43,34 @@
   "ball": "outputs/v2/ball/youtube/MZzoROG7FlQ_ball.json",
   "calibration": "data/public/youtube_amateur/calibration/MZzoROG7FlQ.json",
   "labels": "data/public/youtube_amateur/labels_events_MZzoROG7FlQ.json",
-  "identityLabels": "data/public/youtube_amateur/labels_identity_MZzoROG7FlQ.json"
+  "identityLabels": "data/public/youtube_amateur/labels_identity_MZzoROG7FlQ.json",
+  "note": "window 2 (frames 15843-16186) overlaps test1 (dev since 2026-09-29)"
  },
  {
   "name": "TrackNet broadcast, leave-one-game-out (10 games)",
   "kind": "tracknet_events",
   "split": "heldout",
   "source": "pred"
+ },
+ {
+  "name": "test1 SwingVision view, 60 s (all events)",
+  "kind": "clip_events",
+  "split": "dev",
+  "session": "server/storage/sessions/3ce88198",
+  "labels": "data/test_clips/labels_test1.json"
+ },
+ {
+  "name": "test2 indoor behind baseline, 90 s, edited (all events)",
+  "kind": "clip_events",
+  "split": "dev",
+  "session": "server/storage/sessions/d1075620",
+  "labels": "data/test_clips/labels_test2.json"
+ },
+ {
+  "name": "test3 short rally, 30 s, phone upload (all events)",
+  "kind": "clip_events",
+  "split": "dev",
+  "session": "server/storage/sessions/641cfe35",
+  "labels": "data/test_clips/labels_test3.json"
  }
 ]

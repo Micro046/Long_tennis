@@ -1,0 +1,133 @@
+{
+ "video": "dist/test_videos/test3_short_rally_30s.mp4",
+ "session": "server/storage/sessions/641cfe35",
+ "split": "dev",
+ "annotator": "Claude, 2026-09-30: ball-track timeline + frame crops. Same match as test2 (4apx), recorded/uploaded from the phone.",
+ "protocol": "Same as labels_test1.json. A = Frank (red, near at start), B = Tim (grey); players change ends in the cut at ~f300-470.",
+ "players": {
+  "A": "Frank",
+  "B": "Tim"
+ },
+ "toleranceFrames": 4,
+ "windows": [
+  {
+   "start": 0,
+   "end": 900,
+   "hits": [
+    {
+     "frameIndex": 19,
+     "player": "A",
+     "stroke": "serve"
+    },
+    {
+     "frameIndex": 51,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 91,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 138,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 489,
+     "player": "B",
+     "stroke": "serve"
+    },
+    {
+     "frameIndex": 517,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 567,
+     "player": "B",
+     "stroke": "backhand"
+    },
+    {
+     "frameIndex": 610,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 655,
+     "player": "B",
+     "stroke": null
+    },
+    {
+     "frameIndex": 694,
+     "player": "A",
+     "stroke": null
+    },
+    {
+     "frameIndex": 876,
+     "player": "B",
+     "stroke": "serve",
+     "uncertain": true
+    }
+   ],
+   "bounces": [
+    {
+     "frameIndex": 38
+    },
+    {
+     "frameIndex": 83
+    },
+    {
+     "frameIndex": 130
+    },
+    {
+     "frameIndex": 165
+    },
+    {
+     "frameIndex": 505
+    },
+    {
+     "frameIndex": 557
+    },
+    {
+     "frameIndex": 590
+    },
+    {
+     "frameIndex": 642,
+     "uncertain": true
+    },
+    {
+     "frameIndex": 685
+    },
+    {
+     "frameIndex": 710,
+     "uncertain": true
+    },
+    {
+     "frameIndex": 890
+    }
+   ],
+   "uncertainIntervals": [
+    [
+     0,
+     15
+    ],
+    [
+     166,
+     180
+    ]
+   ],
+   "deadBall": [
+    [
+     185,
+     478
+    ],
+    [
+     715,
+     870
+    ]
+   ]
+  }
+ ]
+}
