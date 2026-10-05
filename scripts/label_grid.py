@@ -23,7 +23,7 @@ def main(d, out, cands, span=12):
     cal = json.loads((d / "calibration.json").read_text())
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from pipeline import court
-    net_y = float(court.project(np.array(cal["imageFromCourt"]), [(court.CX, court.NET_Y)])[0][1])
+    net_y = float(court.project(court.image_from_court(cal), [(court.CX, court.NET_Y)])[0][1])
     cap = cv2.VideoCapture(str(d / "video.mp4"))
     rows = []
     for c in cands:

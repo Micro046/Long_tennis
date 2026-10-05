@@ -65,9 +65,72 @@ def _intersect_model(a, b):
 MODEL_KP = {k: _intersect_model(*v) for k, v in KEYPOINTS.items()}
 
 
-def project(H, pts):
+class Lens:
+    """One-parameter radial lens distortion about the image centre (wide-angle phone lenses bend straight
+    court lines): p_d = c + (p_u - c) * (1 + k1 * (|p_u - c| / R)^2), R = half the image diagonal.
+    k1 < 0 is barrel distortion (0.5x ultra-wide lenses)."""
+
+    def __init__(self, k1, w, h):
+        self.k1 = float(k1)
+        self.c = np.array([w / 2.0, h / 2.0])
+        self.R = float(np.hypot(w, h) / 2.0)
+
+    def distort(self, pu):
+        pu = np.asarray(pu, np.float64).reshape(-1, 2)
+        d = (pu - self.c) / self.R
+        return self.c + (pu - self.c) * (1 + self.k1 * np.sum(d * d, 1, keepdims=True))
+
+    def undistort(self, pd):
+        pd = np.asarray(pd, np.float64).reshape(-1, 2)
+        pu = pd.copy()
+        for _ in range(20):
+            d = (pu - self.c) / self.R
+            pu = self.c + (pd - self.c) / (1 + self.k1 * np.sum(d * d, 1, keepdims=True))
+        return pu
+
+    def undistort_image(self, img):
+        h, w = img.shape[:2]
+        xs, ys = np.meshgrid(np.arange(w, dtype=np.float64), np.arange(h, dtype=np.float64))
+        src = self.distort(np.stack([xs.ravel(), ys.ravel()], 1)).reshape(h, w, 2).astype(np.float32)
+        return cv2.remap(img, src[..., 0], src[..., 1], cv2.INTER_LINEAR)
+
+
+class Mapping:
+    """Court metres <-> image pixels for one calibration, including lens distortion.
+    direction 'image': court -> image;  'court': image -> court."""
+
+    def __init__(self, cal, direction):
+        self.direction = direction
+        self.H = np.asarray(cal["imageFromCourt"] if direction == "image" else cal["courtFromImage"], np.float64)
+        d = cal.get("distortion")
+        self.lens = Lens(d["k1"], *cal["imageSize"]) if d and d.get("k1") else None
+
+    def apply(self, pts):
+        pts = np.asarray(pts, np.float64).reshape(-1, 2)
+        if self.direction == "image":
+            out = _persp(self.H, pts)
+            return self.lens.distort(out) if self.lens else out
+        return _persp(self.H, self.lens.undistort(pts) if self.lens else pts)
+
+
+def image_from_court(cal):
+    return Mapping(cal, "image")
+
+
+def court_from_image(cal):
+    return Mapping(cal, "court")
+
+
+def _persp(H, pts):
     pts = np.asarray(pts, np.float64).reshape(-1, 1, 2)
     return cv2.perspectiveTransform(pts, np.asarray(H, np.float64)).reshape(-1, 2)
+
+
+def project(H, pts):
+    """H: a 3x3 homography or a Mapping (with lens distortion)."""
+    if isinstance(H, Mapping):
+        return H.apply(pts)
+    return _persp(H, pts)
 
 
 def white_mask(img):
@@ -135,8 +198,8 @@ def line_support(mask, H, step=2.0, tol=2):
     return hit / max(1, tot)
 
 
-def calibrate(img, init_image_pts: dict, iterations=3, band=12):
-    """init_image_pts: {keypoint_name: (x, y)} with >=4 entries (rough user placement)."""
+def _calibrate_straight(img, init_image_pts: dict, iterations=3, band=12):
+    """Line-snapping fit on an image without lens distortion. init_image_pts: {keypoint: (x, y)}, >= 4."""
     names = list(init_image_pts)
     H, _ = cv2.findHomography(np.array([MODEL_KP[n] for n in names], np.float64),
                               np.array([init_image_pts[n] for n in names], np.float64))
@@ -182,7 +245,12 @@ def calibrate(img, init_image_pts: dict, iterations=3, band=12):
     for kp, p in zip(used, dst):
         q = project(H, [MODEL_KP[kp]])[0]
         reproj.append(float(np.linalg.norm(q - p)))
-    return {"imageFromCourt": np.asarray(H).tolist(),
+    H0, _ = cv2.findHomography(np.array([MODEL_KP[n] for n in names], np.float64),
+                               np.array([init_image_pts[n] for n in names], np.float64))
+    fallback = not valid_fit(H, init_image_pts, w, h)
+    if fallback:   # the snapped fit is degenerate or left the user's markers: trust the markers
+        H, used, reproj, fitted = H0, list(names), [0.0] * len(names), {}
+    return {"imageFromCourt": np.asarray(H).tolist(), "markerFallback": bool(fallback),
             "courtFromImage": np.linalg.inv(H).tolist(),
             "linesSnapped": sorted(fitted), "keypointsUsed": used,
             "reprojectionRmsPx": float(np.sqrt(np.mean(np.square(reproj)))) if reproj else None,
@@ -190,11 +258,63 @@ def calibrate(img, init_image_pts: dict, iterations=3, band=12):
             "imageSize": [w, h]}
 
 
+
+def valid_fit(H, markers, w, h):
+    """A court fit must keep the user's markers where they were placed and look like a court seen from
+    behind the near baseline: convex, far baseline above and narrower than the near baseline."""
+    if H is None or not np.all(np.isfinite(H)):
+        return False
+    tol = max(25.0, 0.02 * w)
+    for k, p in markers.items():
+        if np.linalg.norm(project(H, [MODEL_KP[k]])[0] - np.asarray(p, float)) > tol:
+            return False
+    fl, fr, nr, nl = project(H, [(0, 0), (WIDTH, 0), (WIDTH, LENGTH), (0, LENGTH)])
+    if not (fl[1] < nl[1] and fr[1] < nr[1]):
+        return False
+    if not (np.linalg.norm(fr - fl) < np.linalg.norm(nr - nl)) or np.linalg.norm(fr - fl) < 0.02 * w:
+        return False
+    quad = np.array([fl, fr, nr, nl], np.float32)
+    return bool(cv2.isContourConvex(quad)) and cv2.contourArea(quad) > 0.01 * w * h
+
+
+def calibrate(img, init_image_pts: dict, iterations=3, band=12, k1_range=(-0.36, 0.12)):
+    """Court calibration with lens-distortion search: for each candidate distortion k1 the background is
+    straightened, the court lines are snapped, and the k1 whose fitted court lines lie best on the white
+    paint wins (coarse grid, then refined). Returns the straight-image homographies plus 'distortion'."""
+    h, w = img.shape[:2]
+
+    def fit(k1):
+        lens = Lens(k1, w, h)
+        und = lens.undistort_image(img) if k1 else img
+        pts = {k: tuple(lens.undistort([p])[0]) if k1 else p for k, p in init_image_pts.items()}
+        r = _calibrate_straight(und, pts, iterations, band)
+        return r["lineSupport"] - (0.05 if r["markerFallback"] else 0.0), r
+
+    results = {0.0: fit(0.0)}
+    for k1 in np.arange(k1_range[0], k1_range[1] + 1e-9, 0.06):
+        k1 = round(float(k1), 3)
+        if k1 not in results:
+            results[k1] = fit(k1)
+    best = max(results, key=lambda k: results[k][0])
+    for k1 in np.arange(best - 0.04, best + 0.041, 0.02):
+        k1 = round(float(k1), 3)
+        if k1 not in results:
+            results[k1] = fit(k1)
+    best = max(results, key=lambda k: results[k][0])
+    r = results[best][1]
+    r["imageSize"] = [w, h]
+    r["distortion"] = {"model": "radial1", "k1": best} if best else None
+    r["distortionSearch"] = {str(k): round(v[0], 4) for k, v in sorted(results.items())}
+    return r
+
+
 def draw(img, H, color=(0, 255, 255), thickness=2):
+    """H: homography or Mapping (lines are drawn as curves when the lens bends them)."""
     out = img.copy()
     for a, b in LINES.values():
-        seg = project(H, [a, b]).astype(int)
-        cv2.line(out, tuple(seg[0]), tuple(seg[1]), color, thickness)
+        pts = [np.asarray(a, float) + t * (np.asarray(b, float) - np.asarray(a, float)) for t in np.linspace(0, 1, 24)]
+        seg = project(H, pts).astype(np.int32)
+        cv2.polylines(out, [seg.reshape(-1, 1, 2)], False, color, thickness)
     return out
 
 

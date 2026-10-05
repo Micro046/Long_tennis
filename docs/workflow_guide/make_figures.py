@@ -35,7 +35,7 @@ def main(d):
     ball = json.loads((d / "ball.json").read_text())["frames"]
     rep = json.loads((d / "report.json").read_text())
     cap = cv2.VideoCapture(str(d / "video.mp4"))
-    H_img = np.array(cal["imageFromCourt"])
+    H_img = court.image_from_court(cal)
     bg = cv2.imread(str(d / "background.jpg"))
     h, w = bg.shape[:2]
 

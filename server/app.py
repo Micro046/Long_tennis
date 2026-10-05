@@ -229,15 +229,19 @@ def calibrate(sid: str, body: dict):
     except Exception as e:  # singular fit etc.
         raise HTTPException(422, f"calibration failed: {e}")
     ok = len(r["keypointsUsed"]) >= 4 and (r["reprojectionRmsPx"] or 99) < 12 and r.get("lineSupport", 0) > 0.6
+    # court lines for the app overlay; split into short segments so lens-bent lines are drawn as curves
     lines = []
+    M = court.image_from_court(r)
     for a, b in court.LINES.values():
-        p, q = court.project(r["imageFromCourt"], [a, b])
-        lines.append([round(p[0] / w, 5), round(p[1] / h, 5), round(q[0] / w, 5), round(q[1] / h, 5)])
+        pts = M.apply([np.asarray(a, float) + t * (np.asarray(b, float) - np.asarray(a, float)) for t in np.linspace(0, 1, 9)])
+        for p, q in zip(pts, pts[1:]):
+            lines.append([round(p[0] / w, 5), round(p[1] / h, 5), round(q[0] / w, 5), round(q[1] / h, 5)])
     (d / "calibration.json").write_text(json.dumps({**r, "markers": markers, "source": "median background"}))
     if meta["status"] in ("uploaded", "calibrated", "failed", "done"):
         meta["status"] = "calibrated"; save(meta)
     return {"ok": ok, "rmsPx": r["reprojectionRmsPx"], "lineSupport": r.get("lineSupport"),
-            "keypointsUsed": r["keypointsUsed"], "lines": lines}
+            "keypointsUsed": r["keypointsUsed"], "lines": lines, "lensDistortion": r.get("distortion"),
+            "markerFallback": r.get("markerFallback")}
 
 
 @app.post("/api/v1/sessions/{sid}/analyze", dependencies=[Depends(auth)])

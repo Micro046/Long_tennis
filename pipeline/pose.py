@@ -127,7 +127,7 @@ def process_frame(D, frame, H_img, H_court, tiles):
 
 def run(video, calib_path, out, stride=1, limit=None, progress=None):
     cal = json.loads(Path(calib_path).read_text())
-    H_img, H_court = np.array(cal["imageFromCourt"]), np.array(cal["courtFromImage"])
+    H_img, H_court = court.image_from_court(cal), court.court_from_image(cal)
     cap = cv2.VideoCapture(str(video))
     w, h, n, fps = int(cap.get(3)), int(cap.get(4)), int(cap.get(7)), cap.get(5)
     n = n if limit is None else min(n, limit)

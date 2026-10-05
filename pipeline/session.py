@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pickle
 import sys
 from collections import Counter
@@ -21,7 +22,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from pipeline import court, events as ev, identity as idm  # noqa: E402
+from pipeline import court, events as ev, identity as idm, rally  # noqa: E402
 
 NOSE, LSH, RSH, LWR, RWR, LHIP, RHIP = 0, 5, 6, 9, 10, 11, 12
 
@@ -66,11 +67,13 @@ def _iou(a, b):
 
 
 # ----------------------------------------------------------------------------- events
-def detect_events(ball, model_path, thr_hit=0.5, thr_bounce=0.5):
+def detect_events(ball, model_path, thr_hit=0.5, thr_bounce=0.5, ball_px=None):
     m = pickle.load(open(model_path, "rb"))
     W, H = ball["video"]["widthPx"], ball["video"]["heightPx"]
     fps = ball["video"]["fps"]
-    xy = np.array([[f[0], f[1]] if f else [np.nan, np.nan] for f in ball["frames"]], float) / H
+    if ball_px is None:
+        ball_px = np.array([[f[0], f[1]] if f else [np.nan, np.nan] for f in ball["frames"]], float)
+    xy = np.asarray(ball_px, float) / H
     xyc, obs = ev.clean_track(xy)
     X, _ = ev.trajectory_features(xyc, obs, fps)
     prob = m["model"].predict_proba(X)
@@ -359,21 +362,27 @@ def attribute_and_dedupe(hits, ball_px, frames, ident, fps, window_s=1.5):
     return keep, dropped
 
 
-def build_shots(hits, bounces, ball_px, frames, ident, H_court, fps, handed=None):
+def build_shots(hits, bounces, ball_px, frames, ident, H_court, fps, handed=None, attribution=None):
+    """attribution: {hit frame: (player id | None, side, reach metres)} from the rally decoder; without
+    it the hitter is the person whose wrist is nearest the ball in the image (legacy)."""
     handed = handed or {}
     shots = []
     hits = sorted(hits)
     bounces = sorted(bounces)
     for n, h in enumerate(hits):
-        pid, dist = hitter_for(h, ball_px, frames, ident, fps)
-        side = nearest_pose(h, pid, ident)[1]["side"] if pid and nearest_pose(h, pid, ident)[1] else None
+        if attribution is not None:
+            pid, side, dist = attribution[h]
+        else:
+            pid, dist = hitter_for(h, ball_px, frames, ident, fps)
+            side = nearest_pose(h, pid, ident)[1]["side"] if pid and nearest_pose(h, pid, ident)[1] else None
         nxt = hits[n + 1] if n + 1 < len(hits) else h + int(4 * fps)
         prv = hits[n - 1] if n else None
         gap = (h - prv) / fps if prv is not None else None
         bounced_before = prv is not None and any(prv < b < h for b in bounces)
         first_b = next((b for b in bounces if h + 2 < b < min(nxt, h + int(3.5 * fps))), None)
         shot = {"hitFrame": h, "timeS": round(h / fps, 3), "playerId": pid or "unknown", "side": side,
-                "attributionDistanceBodyHeights": None if dist is None else round(float(dist), 3)}
+                ("attributionReachM" if attribution is not None else "attributionDistanceBodyHeights"):
+                    None if dist is None else round(float(dist), 3)}
         shot["stroke"], shot["strokeEvidence"] = (stroke_class(h, pid, side, ball_px, frames, ident, gap,
                                                              bounced_before or gap is None or gap > 2.5,
                                                              handed.get(pid, "right"))
@@ -490,13 +499,15 @@ def run(video, ball_path, pose_path, calib_path, model_path, out_path, names=Non
     ball["frames"], pose["frames"] = ball["frames"][:n], pose["frames"][:n]
     ball["video"]["frameCount"] = n
     fps = ball["video"]["fps"]
-    H_court = np.array(cal["courtFromImage"])
+    H_court = court.court_from_image(cal)
     # the phone runs pose on every `pose_stride`-th frame; mimic that exactly
     frames = [person_list(f) if i % pose_stride == 0 else None for i, f in enumerate(pose["frames"])]
     compute_appearance(video, frames, stride=pose_stride)
     ident, tracks, seed = idm.assign_identities(frames, pose.get("sceneCuts", []), fps, seed_a_side=seed_a_side)
+    H_img = court.image_from_court(cal)
+    if os.environ.get("LT_RALLY", "1") == "1":
+        return run_rally(ball, frames, ident, tracks, seed, cal, model_path, out_path, names, handed, fps)
     hits, bounces, prob, ball_px = detect_events(ball, model_path)
-    H_img = np.array(cal["imageFromCourt"])
     slow = {"hits": [], "bounces": []}
     for key, lst in (("hits", hits), ("bounces", bounces)):
         for e in lst:
@@ -506,7 +517,7 @@ def run(video, ball_path, pose_path, calib_path, model_path, out_path, names=Non
     hits = merge_close_hits([h for h in hits if h not in slow["hits"]], prob, int(round(10 * fps / 30)))
     bounces = [b for b in bounces if b not in slow["bounces"]]
     Himg = ball["video"]["heightPx"]
-    net_img_y = float(court.project(np.array(cal["imageFromCourt"]), [(court.CX, court.NET_Y)])[0][1])
+    net_img_y = float(court.project(court.image_from_court(cal), [(court.CX, court.NET_Y)])[0][1])
     # ball_handling()/rally_valid() were replaced by the physical in-play speed floor: they also removed
     # genuine shots into the net (measured on dev labels, 2026-09-28).
     dead = {"hits": [], "bounces": []}
@@ -532,6 +543,43 @@ def run(video, ball_path, pose_path, calib_path, model_path, out_path, names=Non
         "identity": {"seedFrame": seed["seedFrame"], "tracklets": len(tracks),
                      "framesWithA": sum(1 for f in ident if "A" in f), "framesWithB": sum(1 for f in ident if "B" in f)},
         "events": {"hits": hits, "bounces": bounces, "ballHandlingRemoved": dead},
+        "shots": shots,
+        "perFrameIdentity": [{k: {"det": v["det"], "side": v["side"]} for k, v in f.items()} for f in ident],
+    }
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(out_path).write_text(json.dumps(report, separators=(",", ":")))
+    return report
+
+
+def run_rally(ball, frames, ident, tracks, seed, cal, model_path, out_path, names, handed, fps):
+    """Engine v3: static-ball suppression -> event probabilities -> rally decoding (pipeline/rally.py)."""
+    H_court, H_img = court.court_from_image(cal), court.image_from_court(cal)
+    raw = np.array([[f[0], f[1]] if f else [np.nan, np.nan] for f in ball["frames"]], float)
+    cleaned, static = rally.suppress_static(raw, fps)
+    _, _, prob, ball_px = detect_events(ball, model_path, ball_px=cleaned)
+    R = rally.run(prob, ball_px, frames, ident, fps, H_img, H_court)
+    hits = [h for h, _, _ in R["hits"]]
+    attribution = {h: (pid, side, next((c["sides"][side][2] for c in R["candidates"] if c["t"] == h and c["type"] == "hit"), None))
+                   for h, side, pid in R["hits"]}
+    bounces = [b for b, _, _ in R["bounces"]]
+    handed = dict(handed or {"A": "right", "B": "right"})
+    shots = build_shots(hits, bounces, ball_px, frames, ident, H_court, fps, handed, attribution=attribution)
+    bstatus = {b: st for b, _, st in R["bounces"]}
+    for s in shots:
+        bf = s["landing"].get("bounceFrame")
+        if bf is not None and bstatus.get(bf) == "net":
+            s["landing"]["status"] = "net"; s["landing"].pop("region", None)
+    _, votes = estimate_handedness(shots, frames, ident)
+    report = {
+        "schemaVersion": "2.1", "type": "session_report", "engine": "rally-v3",
+        "video": ball["video"], "fps": fps,
+        "players": summarize(shots, names or {}),
+        "handedness": handed, "handednessSource": "setup (default right)", "handednessVotesHint": votes,
+        "identity": {"seedFrame": seed["seedFrame"], "tracklets": len(tracks),
+                     "framesWithA": sum(1 for f in ident if "A" in f), "framesWithB": sum(1 for f in ident if "B" in f)},
+        "events": {"hits": hits, "bounces": bounces, "deadBall": R["dead"], "rejected": R["false"],
+                   "staticBallFrames": len(static), "ballHandlingRemoved": {"deadBall": R["dead"]}},
+        "points": [{"start": a, "end": b, "endReason": why} for a, b, why in R["points"]],
         "shots": shots,
         "perFrameIdentity": [{k: {"det": v["det"], "side": v["side"]} for k, v in f.items()} for f in ident],
     }
