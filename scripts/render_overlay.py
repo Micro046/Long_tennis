@@ -101,7 +101,7 @@ def draw(img, f, rep, pz, ball, H_img, state, s):
     return img
 
 
-def render(video, rep, pz, ball, cal, out, start, stop, scale):
+def render(video, rep, pz, ball, cal, out, start, stop, scale, args_bitrate="2.2M"):
     cap = cv2.VideoCapture(str(video))
     fps = cap.get(5)
     w, h = int(cap.get(3)), int(cap.get(4))
@@ -121,7 +121,7 @@ def render(video, rep, pz, ball, cal, out, start, stop, scale):
         lines_layer = court.draw(lines_layer, _scaled(H_img, scale), (200, 200, 200), 1)
     enc = subprocess.Popen([ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgr24",
                             "-s", f"{ow}x{oh}", "-r", f"{fps}", "-i", "-", "-c:v",
-                            "h264_videotoolbox" if sys.platform == "darwin" else "libx264", "-b:v", "6M",
+                            "h264_videotoolbox" if sys.platform == "darwin" else "libx264", "-b:v", args_bitrate,
                             "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)
     cap.set(1, start)
     for f in range(start, stop):
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     ap.add_argument("paths", nargs="+", help="SESSION_DIR, or VIDEO REPORT POSE")
     ap.add_argument("--ball"); ap.add_argument("--calibration")
     ap.add_argument("--out"); ap.add_argument("--start", type=int, default=0); ap.add_argument("--stop", type=int)
-    ap.add_argument("--scale", type=float, default=0.5)
+    ap.add_argument("--scale", type=float, default=0.5); ap.add_argument("--bitrate", default="2.2M")
     ap.add_argument("--audit", type=int); ap.add_argument("--out-dir"); ap.add_argument("--seed", type=int, default=3)
     a = ap.parse_args()
     a.session = a.paths[0] if len(a.paths) == 1 else None
@@ -199,4 +199,4 @@ if __name__ == "__main__":
     if a.audit:
         audit(video, rep, pz, ball, a.audit, a.out_dir, seed=a.seed)
     else:
-        render(video, rep, pz, ball, cal, a.out, a.start, a.stop or len(ball), a.scale)
+        render(video, rep, pz, ball, cal, a.out, a.start, a.stop or len(ball), a.scale, a.bitrate)
