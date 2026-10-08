@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Render a session report onto the video: A/B boxes, ball trail, hit/bounce markers, stroke labels,
-and a mini-court with landing points. Also renders audit strips for individual shots.
+"""Render an analysed session onto its video: player boxes with names, ball trail, court lines, hit and
+bounce markers, stroke/landing/speed per shot, point boundaries, and a mini-court with every landing.
 
-  render_overlay.py video report.json pose.json --out out.mp4 [--start F --stop F]
-  render_overlay.py video report.json pose.json --audit N --out-dir dir   (random shot strips)
+  render_overlay.py SESSION_DIR --out out.mp4 [--start F --stop F] [--scale 0.5]
+  render_overlay.py VIDEO REPORT POSE --ball BALL --out out.mp4         (explicit files)
+  render_overlay.py SESSION_DIR --audit N --out-dir dir                  (blind shot audit sheets)
+
+Encodes H.264 through ffmpeg (hardware encoder on macOS) so the file plays in QuickTime / on phones.
 """
 import argparse
 import json
 import random
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,75 +19,147 @@ import cv2
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT)); sys.path.insert(1, str(ROOT / "scripts"))
+sys.path.insert(0, str(ROOT))
 from pipeline import court  # noqa: E402
 
 COL = {"A": (255, 190, 60), "B": (60, 170, 255), "unknown": (180, 180, 180)}
+BOUNCE = (80, 255, 80)
 
 
-def load(video, report, pose):
-    rep = json.loads(Path(report).read_text())
-    pz = json.loads(Path(pose).read_text())
-    ball = json.loads(Path(rep["ballPath"]).read_text())["frames"] if "ballPath" in rep else rep.get("ballTrack")
-    return rep, pz, ball
+def ffmpeg_exe():
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return "ffmpeg"
 
 
-def draw_frame(img, f, rep, pz, ball, shots_by_hit, bounce_set, recent):
+def load(args):
+    if args.session:
+        d = Path(args.session)
+        video, report, pose, ball, cal = d / "video.mp4", d / "report.json", d / "pose.json", d / "ball.json", d / "calibration.json"
+    else:
+        video, report, pose, ball, cal = Path(args.video), Path(args.report), Path(args.pose), Path(args.ball), \
+            (Path(args.calibration) if args.calibration else None)
+    rep = json.loads(report.read_text())
+    pz = json.loads(pose.read_text())
+    bl = json.loads(ball.read_text())["frames"]
+    calib = json.loads(cal.read_text()) if cal and cal.exists() else None
+    return video, rep, pz, bl, calib
+
+
+def mini_court(w=150, scale=10.0):
+    """Top view, far baseline at the top. Returns image and a court->pixel function."""
+    m = 12
+    W, H = int(court.WIDTH * scale) + 2 * m, int(court.LENGTH * scale) + 2 * m
+    img = np.full((H, W, 3), (60, 110, 70), np.uint8)
+    to = lambda x, y: (int(m + x * scale), int(m + y * scale))
+    for a, b in court.LINES.values():
+        cv2.line(img, to(*a), to(*b), (235, 235, 235), 1)
+    cv2.line(img, to(-0.5, court.NET_Y), to(court.WIDTH + 0.5, court.NET_Y), (40, 40, 40), 2)
+    return img, to
+
+
+def draw(img, f, rep, pz, ball, H_img, state, s):
     per = rep["perFrameIdentity"]
-    ppl = pz["frames"][f] or []
-    # nearest frame with identity (pose every 3rd frame)
     g = next((x for x in (f, f - 1, f + 1, f - 2, f + 2) if 0 <= x < len(per) and per[x]), None)
-    if g is not None:
+    if g is not None and pz["frames"][g]:
         for pid, a in per[g].items():
-            p = (pz["frames"][g] or [])[a["det"]] if pz["frames"][g] else None
-            if p is None:
-                continue
-            x1, y1, x2, y2 = map(int, p[:4])
-            cv2.rectangle(img, (x1, y1), (x2, y2), COL[pid], 3)
-            name = rep["players"][pid]["name"]
-            cv2.putText(img, f"{name} ({a['side']})", (x1, max(20, y1 - 8)), 0, 0.8, COL[pid], 2)
-    for k in range(max(0, f - 12), f + 1):
-        b = ball[k] if ball and k < len(ball) else None
+            p = pz["frames"][g][a["det"]]
+            x1, y1, x2, y2 = (int(v * s) for v in p[:4])
+            cv2.rectangle(img, (x1, y1), (x2, y2), COL[pid], 2)
+            cv2.putText(img, rep["players"][pid]["name"], (x1, max(18, y1 - 6)), 0, 0.6, COL[pid], 2)
+    for k in range(max(0, f - 10), f + 1):
+        b = ball[k] if k < len(ball) else None
         if b:
-            cv2.circle(img, (int(b[0]), int(b[1])), 4 if k < f else 8, (0, 255, 255), -1 if k < f else 2)
-    for (kind, fr, txt, col) in recent:
-        if f - fr < 20:
-            cv2.putText(img, txt, (30, 120 + 40 * (kind == "bounce")), 0, 1.1, col, 3)
+            cv2.circle(img, (int(b[0] * s), int(b[1] * s)), 3 if k < f else 6, (0, 255, 255), -1 if k < f else 2)
+    for kind, fr, txt, col, pos in state["recent"]:
+        age = f - fr
+        if kind == "bounce" and pos is not None and age < 25:
+            cv2.circle(img, (int(pos[0] * s), int(pos[1] * s)), 14, BOUNCE, 2)
+    # banner with the latest shot
+    lines = [r for r in state["recent"] if f - r[1] < 45][-2:]
+    for i, (kind, fr, txt, col, _) in enumerate(lines):
+        cv2.rectangle(img, (10, 10 + 34 * i), (10 + 11 * len(txt) + 16, 40 + 34 * i), (0, 0, 0), -1)
+        cv2.putText(img, txt, (18, 32 + 34 * i), 0, 0.65, col, 2)
+    # point status + clock
+    t = f / state["fps"]
+    pt = next((p for p in rep.get("points", []) if p["start"] - 15 <= f <= p["end"] + 30), None)
+    clock = f"{int(t // 60):02d}:{t % 60:04.1f}"
+    status = f"POINT {state['point_no'].get(pt['start'], '')}" if pt else "between points"
+    W = img.shape[1]
+    cv2.rectangle(img, (W - 260, 10), (W - 10, 40), (0, 0, 0), -1)
+    cv2.putText(img, f"{clock}  {status}", (W - 252, 32), 0, 0.6, (255, 255, 255) if pt else (150, 150, 150), 1)
+    # mini court with landings so far
+    mc = state["mini"].copy()
+    for (x, y, pid, fr) in state["landings"]:
+        if fr <= f:
+            cv2.circle(mc, state["to"](x, y), 3 if f - fr > 60 else 5, COL.get(pid, COL["unknown"]), -1)
+    h0, w0 = mc.shape[:2]
+    y0 = img.shape[0] - h0 - 10
+    img[y0:y0 + h0, W - w0 - 10:W - 10] = mc
     return img
 
 
-def render(video, rep, pz, ball, out, start, stop):
-    cap = cv2.VideoCapture(str(video)); fps = cap.get(5)
+def render(video, rep, pz, ball, cal, out, start, stop, scale):
+    cap = cv2.VideoCapture(str(video))
+    fps = cap.get(5)
     w, h = int(cap.get(3)), int(cap.get(4))
-    cap.set(1, start)
-    vw = cv2.VideoWriter(str(out), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w // 2, h // 2))
+    ow, oh = int(w * scale) // 2 * 2, int(h * scale) // 2 * 2
+    H_img = court.image_from_court(cal) if cal else None
+    mini, to = mini_court()
     shots = {s["hitFrame"]: s for s in rep["shots"]}
     bounces = set(rep["events"]["bounces"])
-    recent = []
+    landings = [(s["landing"]["courtM"][0], s["landing"]["courtM"][1], s["playerId"], s["landing"]["bounceFrame"])
+                for s in rep["shots"] if s["landing"].get("courtM") and s["landing"].get("region")]
+    state = {"recent": [], "fps": fps, "mini": mini, "to": to, "landings": landings,
+             "point_no": {p["start"]: i + 1 for i, p in enumerate(rep.get("points", []))}}
+    # static court-line layer (lens-aware)
+    lines_layer = None
+    if H_img is not None:
+        lines_layer = np.zeros((oh, ow, 3), np.uint8)
+        lines_layer = court.draw(lines_layer, _scaled(H_img, scale), (200, 200, 200), 1)
+    enc = subprocess.Popen([ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "rawvideo", "-pix_fmt", "bgr24",
+                            "-s", f"{ow}x{oh}", "-r", f"{fps}", "-i", "-", "-c:v",
+                            "h264_videotoolbox" if sys.platform == "darwin" else "libx264", "-b:v", "6M",
+                            "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)
+    cap.set(1, start)
     for f in range(start, stop):
         ok, img = cap.read()
         if not ok:
             break
+        img = cv2.resize(img, (ow, oh), interpolation=cv2.INTER_AREA)
+        if lines_layer is not None:
+            img = cv2.addWeighted(img, 1.0, lines_layer, 0.35, 0)
         if f in shots:
-            s = shots[f]
-            nm = rep["players"].get(s["playerId"], {}).get("name", "?")
-            sp = f" {s['speed']['avgKmh']:.0f} km/h" if "speed" in s else ""
-            recent.append(("hit", f, f"HIT {nm}: {s['stroke']}{sp}", COL.get(s["playerId"], COL["unknown"])))
+            sh = shots[f]
+            nm = rep["players"].get(sh["playerId"], {}).get("name", "unknown player")
+            land = sh["landing"].get("region") or sh["landing"].get("status", "")
+            sp = f", {sh['speed']['avgKmh']:.0f} km/h" if "speed" in sh else ""
+            state["recent"].append(("hit", f, f"HIT  {nm}: {sh['stroke']} -> {land}{sp}", COL.get(sh["playerId"], COL["unknown"]), None))
         if f in bounces:
-            recent.append(("bounce", f, "BOUNCE", (80, 255, 80)))
-            b = ball[f]
-            if b:
-                cv2.circle(img, (int(b[0]), int(b[1])), 18, (80, 255, 80), 3)
-        draw_frame(img, f, rep, pz, ball, shots, bounces, recent)
-        cv2.putText(img, f"{f}", (w - 160, 40), 0, 1, (255, 255, 255), 2)
-        vw.write(cv2.resize(img, (w // 2, h // 2)))
-    vw.release()
+            state["recent"].append(("bounce", f, "BOUNCE", BOUNCE, ball[f] if f < len(ball) else None))
+        draw(img, f, rep, pz, ball, H_img, state, scale)
+        enc.stdin.write(img.tobytes())
+        if (f - start) % 3000 == 0:
+            print(f"render {f - start}/{stop - start}", flush=True)
+    enc.stdin.close()
+    enc.wait()
+
+
+def _scaled(M, s):
+    """Wrap a court->image mapping so it returns coordinates in the scaled output frame."""
+    class S:
+        def apply(self, pts):
+            return M.apply(pts) * s
+    m = court.Mapping.__new__(court.Mapping)
+    m.direction, m.H, m.lens = "image", None, None
+    m.apply = S().apply
+    return m
 
 
 def audit(video, rep, pz, ball, n, out_dir, seed=3, per_sheet=4):
-    """Blind audit sheets: for each sampled predicted hit, one row of 5 full frames (f-6..f+6 step 3)
-    with a far-court zoom band on top. Only frame numbers are drawn; the key with predictions is
-    written separately so the reviewer judges contact / hitter / stroke independently."""
+    """Blind audit sheets: for each sampled predicted hit, one row of 5 full frames (f-6..f+6 step 3)."""
     out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
     shots = list(rep["shots"])
     random.Random(seed).shuffle(shots)
@@ -97,8 +173,7 @@ def audit(video, rep, pz, ball, n, out_dir, seed=3, per_sheet=4):
             cap.set(1, k); ok, img = cap.read()
             if not ok:
                 img = np.zeros((1080, 1920, 3), np.uint8)
-            full = cv2.resize(img[80:1000], (384, 184)); zoom = cv2.resize(img[120:420, 300:1700], (384, 82))
-            t = np.vstack([zoom, full])
+            t = cv2.resize(img, (384, 216))
             cv2.putText(t, f"#{i} {k}{' <' if k == f else ''}", (4, 16), 0, 0.5, (0, 255, 255), 1)
             tiles.append(t)
         rows.append(np.hstack(tiles))
@@ -111,12 +186,17 @@ def audit(video, rep, pz, ball, n, out_dir, seed=3, per_sheet=4):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("video"); ap.add_argument("report"); ap.add_argument("pose")
+    ap.add_argument("paths", nargs="+", help="SESSION_DIR, or VIDEO REPORT POSE")
+    ap.add_argument("--ball"); ap.add_argument("--calibration")
     ap.add_argument("--out"); ap.add_argument("--start", type=int, default=0); ap.add_argument("--stop", type=int)
+    ap.add_argument("--scale", type=float, default=0.5)
     ap.add_argument("--audit", type=int); ap.add_argument("--out-dir"); ap.add_argument("--seed", type=int, default=3)
     a = ap.parse_args()
-    rep, pz, ball = load(a.video, a.report, a.pose)
+    a.session = a.paths[0] if len(a.paths) == 1 else None
+    if not a.session:
+        a.video, a.report, a.pose = a.paths
+    video, rep, pz, ball, cal = load(a)
     if a.audit:
-        audit(a.video, rep, pz, ball, a.audit, a.out_dir, seed=a.seed)
+        audit(video, rep, pz, ball, a.audit, a.out_dir, seed=a.seed)
     else:
-        render(a.video, rep, pz, ball, a.out, a.start, a.stop or len(ball))
+        render(video, rep, pz, ball, cal, a.out, a.start, a.stop or len(ball), a.scale)
