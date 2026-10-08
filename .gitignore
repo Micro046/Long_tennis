@@ -27,3 +27,5 @@ app/**/build/
 app/**/.dart_tool/
 app/**/.flutter-plugins*
 server/storage/
+# local Claude Code settings
+.claude/settings.local.json
