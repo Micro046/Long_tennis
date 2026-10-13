@@ -14,3 +14,6 @@ scipy==1.18.1
 torch==2.14.0
 torchvision==0.29.0
 uvicorn==0.54.0
+matplotlib==3.11.2
+imageio-ffmpeg==0.6.0
+pillow==12.3.0
