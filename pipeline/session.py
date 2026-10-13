@@ -273,6 +273,7 @@ def head_y(k, box):
     return (min(sh) - 0.12 * (box[3] - box[1])) if sh else None
 
 
+HANDED_MIN_VOTES, HANDED_MIN_SHARE = 10, 0.8   # serves needed to override the setup handedness
 STROKE_SIDE_MIN, STROKE_SIDE_MAX = 0.3, 1.5   # body heights; outside: ball not clearly on one side / pose wrong
 
 
@@ -620,17 +621,29 @@ def run_rally(ball, frames, ident, tracks, seed, cal, model_path, out_path, name
     bounces = [b for b, _, _ in R["bounces"]]
     handed = dict(handed or {"A": "right", "B": "right"})
     shots = build_shots(hits, bounces, ball_px, frames, ident, H_court, fps, handed, attribution=attribution)
+    # handedness from the serving arm overrides the setup when the evidence is strong (the setup default is
+    # "right", and a wrong answer mirrors every forehand/backhand of that player)
+    _, votes = estimate_handedness(shots, frames, ident)
+    source = "setup"
+    for pid, v in votes.items():
+        tot = sum(v.values())
+        if tot >= HANDED_MIN_VOTES:
+            top = max(v, key=v.get)
+            if v[top] >= HANDED_MIN_SHARE * tot and top != handed.get(pid):
+                handed[pid] = top
+                source = "detected from serves (overrides setup)"
+    if source != "setup":
+        shots = build_shots(hits, bounces, ball_px, frames, ident, H_court, fps, handed, attribution=attribution)
     bstatus = {b: st for b, _, st in R["bounces"]}
     for s in shots:
         bf = s["landing"].get("bounceFrame")
         if bf is not None and bstatus.get(bf) == "net":
             s["landing"]["status"] = "net"; s["landing"].pop("region", None)
-    _, votes = estimate_handedness(shots, frames, ident)
     report = {
         "schemaVersion": "2.1", "type": "session_report", "engine": "rally-v3",
         "video": ball["video"], "fps": fps,
         "players": summarize(shots, names or {}),
-        "handedness": handed, "handednessSource": "setup (default right)", "handednessVotesHint": votes,
+        "handedness": handed, "handednessSource": source, "handednessVotesHint": votes,
         "identity": {"seedFrame": seed["seedFrame"], "tracklets": len(tracks),
                      "framesWithA": sum(1 for f in ident if "A" in f), "framesWithB": sum(1 for f in ident if "B" in f)},
         "events": {"hits": hits, "bounces": bounces, "deadBall": R["dead"], "rejected": R["false"],
