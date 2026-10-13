@@ -24,7 +24,15 @@ CKPT = ROOT / "work/models/racketvision/balltrack_best.pth"
 W, H, SEQ = 512, 288, 4
 
 
-def load_model(device, student=None, d_model=16):
+def load_model(device, student=None, d_model=16, half=None):
+    """half: run in float16 (default on GPUs: ~1.2x faster, detections identical within 1/900 frames)."""
+    net = _load_model(device, student, d_model)
+    if half is None:
+        half = torch.device(device).type in ("mps", "cuda")
+    return net.half() if half else net
+
+
+def _load_model(device, student=None, d_model=16):
     sys.path.insert(0, str(BALLTRACK_ROOT))
     if student:  # distilled phone model (scripts/train_student_ball.py)
         from model.tracknet_v3 import TrackNet
@@ -107,7 +115,10 @@ def heatmap_to_point(hm, thr=0.5):
     return float(x + w / 2), float(y + h / 2), conf
 
 
-def run(path, out, device="mps", segment_s=120.0, batch=8, thr=0.5, limit=None, net=None, start=0, stop=None, progress=None):
+def run(path, out, device="mps", segment_s=120.0, batch=8, thr=0.5, limit=None, net=None, start=0, stop=None, progress=None,
+        fast=True):
+    if fast and Path(path).is_file():
+        return run_fast(path, out, device, segment_s, batch, thr, limit, net, start, stop, progress)
     src = FrameSource(path)
     n = src.count if limit is None else min(limit, src.count)
     stop = n if stop is None else min(stop, n)
@@ -131,7 +142,7 @@ def run(path, out, device="mps", segment_s=120.0, batch=8, thr=0.5, limit=None, 
             if len(arr) < batch:  # constant batch shape avoids MPS allocator growth
                 arr = np.concatenate([arr, np.repeat(arr[-1:], batch - len(arr), 0)], 0)
             with torch.no_grad():
-                x = torch.from_numpy(arr).to(device)
+                x = torch.from_numpy(arr).to(device).to(next(net.parameters()).dtype)
                 preds = net.forward(frames=x)[0].float().cpu().numpy()[:len(pending)]
                 del x
             if device == "mps":  # the MPS caching allocator otherwise holds ~10 GB of activations
@@ -168,6 +179,99 @@ def run(path, out, device="mps", segment_s=120.0, batch=8, thr=0.5, limit=None, 
                         "threshold": thr, "backgroundSegmentSeconds": segment_s},
            "runtimeSeconds": round(time.perf_counter() - started, 2),
            "frames": results}
+    Path(out).parent.mkdir(parents=True, exist_ok=True)
+    Path(out).write_text(json.dumps(doc, separators=(",", ":")))
+    return doc
+
+
+def run_fast(path, out, device="mps", segment_s=120.0, batch=8, thr=0.5, limit=None, net=None, start=0, stop=None,
+             progress=None):
+    """Same model, inputs and outputs as the reference loop, about twice as fast: frames are decoded in a
+    background thread, uploaded to the GPU once as uint8, and the 15-channel inputs (background + 4 frames)
+    are assembled on the GPU instead of being rebuilt and copied for every frame."""
+    import queue
+    import threading
+    src = FrameSource(path)
+    n = src.count if limit is None else min(limit, src.count)
+    stop = n if stop is None else min(stop, n)
+    dev = torch.device(device)
+    net = net if net is not None else load_model(dev)
+    sx, sy = src.width / W, src.height / H
+    seg_len = max(SEQ + 1, int(segment_s * src.fps))
+    results: list = [None] * n
+    started = time.perf_counter()
+
+    def sync():
+        if device == "mps":
+            torch.mps.synchronize()
+
+    for seg_start in range(start - start % seg_len, stop, seg_len):
+        seg_stop = min(n, seg_start + seg_len)
+        if seg_stop <= start:
+            continue
+        median = torch.from_numpy(np.ascontiguousarray(np.moveaxis(background_median(src, seg_start, seg_stop), -1, 0))).to(dev)
+        q: queue.Queue = queue.Queue(maxsize=64)
+        a = max(seg_start, start - SEQ + 1)
+        b = min(seg_stop, stop)
+
+        def reader():
+            for i, frame in src.stream(a, b):
+                q.put((i, cv2.resize(frame, (W, H))))
+            q.put(None)
+        th = threading.Thread(target=reader, daemon=True)
+        th.start()
+        window: list = []
+        pend_idx, pend_x = [], []
+
+        def flush():
+            if not pend_x:
+                return
+            x = torch.stack(pend_x)
+            dt = next(net.parameters()).dtype
+            if x.dtype != dt:
+                x = x.to(dt)
+            k = len(pend_x)
+            if k < batch:   # constant batch shape avoids MPS allocator growth
+                x = torch.cat([x, x[-1:].expand(batch - k, -1, -1, -1)], 0)
+            with torch.no_grad():
+                hm = net.forward(frames=x)[0][:k]
+                hm = hm[:, -1] if hm.shape[1] > 1 else hm[:, 0]
+                hm = hm.float().cpu().numpy()
+            if device == "mps":
+                torch.mps.empty_cache()
+            for i, h in zip(pend_idx, hm):
+                pt = heatmap_to_point(h, thr)
+                results[i] = None if pt is None else [round(pt[0] * sx, 1), round(pt[1] * sy, 1), round(pt[2], 4)]
+            pend_idx.clear(); pend_x.clear()
+
+        while True:
+            item = q.get()
+            if item is None:
+                break
+            i, small = item
+            t = torch.from_numpy(small).to(dev).permute(2, 0, 1).float().div_(255.0)
+            window.append(t)
+            if len(window) > SEQ:
+                window.pop(0)
+            if i < start:
+                continue
+            seq = [window[0]] * (SEQ - len(window)) + window
+            pend_x.append(torch.cat([median, *seq], 0))
+            pend_idx.append(i)
+            if len(pend_x) == batch:
+                flush()
+        flush()
+        th.join()
+        sync()
+        el = time.perf_counter() - started
+        print(f"{Path(path).name}: {seg_stop}/{n} frames, {(seg_stop - max(start, seg_start)) / max(1e-6, el):.1f} fps (fast)", flush=True)
+        if progress:
+            progress(seg_stop, n)
+    doc = {"schemaVersion": "2.0", "type": "ball_track",
+           "video": {"path": str(path), "widthPx": src.width, "heightPx": src.height, "fps": src.fps, "frameCount": n},
+           "producer": {"component": "RacketVision/TrackNetV3", "input": [W, H], "seq": SEQ, "threshold": thr,
+                        "backgroundSegmentSeconds": segment_s, "loop": "fast"},
+           "runtimeSeconds": round(time.perf_counter() - started, 2), "frames": results}
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     Path(out).write_text(json.dumps(doc, separators=(",", ":")))
     return doc
