@@ -652,6 +652,8 @@ def run_rally(ball, frames, ident, tracks, seed, cal, model_path, out_path, name
         "shots": shots,
         "perFrameIdentity": [{k: {"det": v["det"], "side": v["side"]} for k, v in f.items()} for f in ident],
     }
+    from pipeline import outcome
+    report = outcome.annotate(report)
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     Path(out_path).write_text(json.dumps(report, separators=(",", ":")))
     return report

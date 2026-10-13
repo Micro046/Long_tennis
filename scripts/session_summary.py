@@ -103,6 +103,14 @@ def main():
 <td>{st['serve']}</td><td>{st['forehand']}</td><td>{st['backhand']}</td><td>{st['volley']}</td><td>{st['overhead']}</td><td>{st['unknown']}</td>
 <td>{ld['inCourtFirstBounces']}</td><td>{ld['out']}</td><td>{ld['noObservedBounce']}</td>
 <td>{sp['medianAvgKmh'] or '–'}</td><td>{sp['maxAvgKmh'] or '–'}</td></tr><tr><td></td><td colspan=12 class=small>{reg}</td></tr>""")
+    def pct(v):
+        return "–" if v is None else f"{v:.0f}%"
+    orows = "".join(
+        f"<tr><td><b style='color:{PCOL[pid]}'>{html.escape(P[pid]['name'])}</b></td>"
+        f"<td>{P[pid].get('pointsWon', {}).get('won', '–')} / {P[pid].get('pointsWon', {}).get('decidedPoints', '–')}</td>"
+        f"<td>{P[pid].get('pointsWon', {}).get('wonOnOwnServe', '–')} / {P[pid].get('pointsWon', {}).get('decidedOnOwnServe', '–')}</td>"
+        f"<td>{P[pid].get('serveStats', {}).get('serves', '–')}</td><td>{pct(P[pid].get('serveStats', {}).get('firstServeInPercent'))}</td>"
+        f"<td>{P[pid].get('serveStats', {}).get('doubleFaults', '–')}</td></tr>" for pid in ("A", "B")) if "pointsWon" in P["A"] else ""
     trows = "".join(f"<tr><td>{html.escape(k)}</td><td>{v / 60:.1f} min</td><td>{v / dur:.2f}× video length</td></tr>"
                     for k, v in timing.items() if isinstance(v, (int, float)))
     shot_rows = "".join(
@@ -125,6 +133,7 @@ Point endings: {', '.join(f'{k} {v}' for k, v in ends.items())}.</div>
 <table><tr><th>Player</th><th>Shots</th><th>Serve</th><th>FH</th><th>BH</th><th>Volley</th><th>Overhead</th><th>Unknown</th>
 <th>Landed in</th><th>Out</th><th>No bounce seen</th><th>Median km/h</th><th>Max km/h</th></tr>{''.join(rows)}</table>
 <p class=small>Speed = average speed from the hitter to the first bounce (lower than a radar gun). Landing regions are in the opponent's singles half, seen from the hitter.</p>
+{('<h2>Points and serve</h2><table><tr><th>Player</th><th>Points won / decided</th><th>Won on own serve</th><th>Serves</th><th>1st serve in</th><th>Double faults</th></tr>' + orows + '</table><p class=small>Only points whose ending (out, net, double bounce, double fault) was seen are decided; the rest are left open rather than guessed.</p>') if orows else ''}
 <h2>Where the shots landed</h2><img src="{b64(out / 'landing.png')}">
 <h2>Timeline</h2><img src="{b64(out / 'timeline.png')}">
 <h2>All shots</h2><details><summary>{len(rep['shots'])} shots (also in shots.csv)</summary>

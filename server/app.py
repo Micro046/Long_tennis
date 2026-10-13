@@ -100,7 +100,34 @@ def background(d: Path) -> np.ndarray:
     cap.release()
     img = np.median(np.stack(frames), axis=0).astype(np.uint8)
     cv2.imwrite(str(bg), img, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    (d / "camera_motion.json").write_text(json.dumps(camera_motion(frames)))
     return img
+
+
+def camera_motion(frames, limit_px=8.0):
+    """How far the camera moved during the recording: image shift of each sampled frame against the first
+    (phase correlation on edge images of the lower 2/3, where the court is; players are small against it).
+    The court is calibrated once, so a moved camera shifts every court position after the move."""
+    def edges(f):
+        g = cv2.cvtColor(cv2.resize(f, (640, 360)), cv2.COLOR_BGR2GRAY)[120:]
+        e = cv2.Canny(g, 60, 160).astype(np.float32)
+        return cv2.GaussianBlur(e, (5, 5), 0) * np.outer(np.hanning(e.shape[0]), np.hanning(e.shape[1])).astype(np.float32)
+    if len(frames) < 2:
+        return {"maxShiftPx": 0.0, "moved": False}
+    ref = edges(frames[0]); sc = frames[0].shape[1] / 640.0
+    shifts = []
+    for f in frames[1:]:
+        (dx, dy), _ = cv2.phaseCorrelate(ref, edges(f))
+        shifts.append(float(np.hypot(dx, dy) * sc))
+    # a single odd sample is a player in front of the lens or an edit cut; a moved camera stays moved:
+    # require the shift in at least 3 samples (and 10% of them), and report the typical moved shift
+    over = [v for v in shifts if v > limit_px]
+    moved = len(over) >= max(3, int(0.1 * len(shifts)))
+    mx = float(np.median(over)) if moved else float(np.median(shifts))
+    first = next((i + 1 for i, v in enumerate(shifts) if v > limit_px), None) if moved else None
+    return {"maxShiftPx": round(mx, 1), "moved": bool(moved),
+            "firstMovedAtFraction": None if first is None else round(first / (len(frames) - 1), 2),
+            "shiftsPx": [round(v, 1) for v in shifts]}
 
 
 EDITABLE = ("nameA", "nameB", "seedASide", "handedA", "handedB", "quality")
@@ -239,7 +266,14 @@ def calibrate(sid: str, body: dict):
     (d / "calibration.json").write_text(json.dumps({**r, "markers": markers, "source": "median background"}))
     if meta["status"] in ("uploaded", "calibrated", "failed", "done"):
         meta["status"] = "calibrated"; save(meta)
+    cm = json.loads((d / "camera_motion.json").read_text()) if (d / "camera_motion.json").exists() else None
+    if cm is not None:
+        cal_doc = json.loads((d / "calibration.json").read_text()); cal_doc["cameraMotion"] = cm
+        (d / "calibration.json").write_text(json.dumps(cal_doc))
     return {"ok": ok, "rmsPx": r["reprojectionRmsPx"], "lineSupport": r.get("lineSupport"),
+            "cameraMoved": bool(cm and cm["moved"]), "cameraMaxShiftPx": cm and cm["maxShiftPx"],
+            "warning": ("The camera moved during the recording (up to %.0f px): court positions and in/out calls "
+                        "after the move will be less accurate. Keep the phone fixed." % cm["maxShiftPx"]) if cm and cm["moved"] else None,
             "keypointsUsed": r["keypointsUsed"], "lines": lines, "lensDistortion": r.get("distortion"),
             "markerFallback": r.get("markerFallback")}
 
