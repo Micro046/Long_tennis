@@ -273,6 +273,26 @@ def head_y(k, box):
     return (min(sh) - 0.12 * (box[3] - box[1])) if sh else None
 
 
+STROKE_SIDE_MIN, STROKE_SIDE_MAX = 0.3, 1.5   # body heights; outside: ball not clearly on one side / pose wrong
+
+
+def ball_side_at_contact(frame, pid, side, ball_px, frames, ident, radius=4):
+    """Ball x relative to the hitter's hip centre at the contact frame, in body heights, positive on the
+    player's own right (near player seen from behind: image right; far player faces the camera: image left)."""
+    if side not in ("near", "far") or frame >= len(ball_px) or not np.isfinite(ball_px[frame]).all():
+        return None
+    pf, a = nearest_pose(frame, pid, ident, radius=radius)
+    if not a:
+        return None
+    d = frames[pf][a["det"]]
+    k, box = d["kps"], d["box"]
+    if min(k[LHIP, 2], k[RHIP, 2]) <= 0.3:
+        return None
+    hx = (k[LHIP, 0] + k[RHIP, 0]) / 2
+    rel = (ball_px[frame][0] - hx) / max(20.0, box[3] - box[1])
+    return float(rel if side == "near" else -rel)
+
+
 def stroke_class(frame, pid, side, ball_px, frames, ident, prev_hit_gap_s, bounced_before, handed="right"):
     """Stroke class from pose around contact (validated on 27 hand-labelled shots of the amateur match).
 
@@ -307,6 +327,14 @@ def stroke_class(frame, pid, side, ball_px, frames, ident, prev_hit_gap_s, bounc
         dist_net = abs(y - court.NET_Y)
         if dist_net < 7.0:
             return "volley", {"distanceToNetM": round(float(dist_net), 2)}
+    # 1) side of the body the ball is on at contact (player's own right positive, in body heights): a
+    #    forehand is struck on the racket-hand side, a backhand on the other. Used when clearly readable.
+    side_val = ball_side_at_contact(frame, pid, side, ball_px, frames, ident)
+    if side_val is not None:
+        v = side_val if handed == "right" else -side_val
+        if STROKE_SIDE_MIN <= abs(v) <= STROKE_SIDE_MAX:
+            return ("forehand" if v > 0 else "backhand"), {"ballSideBodyHeights": round(float(side_val), 3)}
+    # 2) otherwise the follow-through
     racket = RWR if handed == "right" else LWR
     xs = []
     for f in range(frame + 4, frame + 13):
