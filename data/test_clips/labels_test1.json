@@ -205,7 +205,8 @@
      "frameIndex": 1091
     },
     {
-     "frameIndex": 1161
+     "frameIndex": 1165,
+     "note": "corrected 2026-10-13: lowest ball position (ground contact) is f1165; f1163-1164 hidden"
     },
     {
      "frameIndex": 1214

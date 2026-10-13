@@ -400,14 +400,41 @@ def build_shots(hits, bounces, ball_px, frames, ident, H_court, fps, handed=None
             pf, pa = nearest_pose(h, pid, ident) if pid else (None, None)
             if pa:
                 src = np.array(frames[pf][pa["det"]]["court"], float)
-                dt = (first_b - h) / fps
+                h0 = contact_frame(h, side, ball_px, fps) if attribution is not None else h
+                dt = (first_b - h0) / fps
                 dist_m = float(np.linalg.norm(pt - src))
-                # plausibility: > 230 km/h average flight speed means a wrong hit/bounce pairing
-                if dt > 0.15 and 3 < dist_m < 32 and dist_m / dt * 3.6 <= 230:
-                    shot["speed"] = {"avgKmh": round(dist_m / dt * 3.6, 1), "distanceM": round(dist_m, 2),
+                kmh = dist_m / dt * 3.6 if dt > 0 else 1e9
+                cap = SPEED_CAP_KMH["serve" if shot["stroke"] == "serve" else "rally"] if attribution is not None else 230
+                if dt > 0.15 and 3 < dist_m < 32 and kmh <= cap:
+                    shot["speed"] = {"avgKmh": round(kmh, 1), "distanceM": round(dist_m, 2),
                                      "flightS": round(dt, 3), "definition": "average ground-projected speed from hitter position to first bounce"}
+                elif attribution is not None:
+                    shot["speedRejected"] = {"kmh": round(min(kmh, 999.0), 1), "flightS": round(dt, 3), "distanceM": round(dist_m, 2),
+                                             "reason": "faster than physically plausible for this shot (hit/bounce timing)"}
         shots.append(shot)
     return shots
+
+
+# average ground speed hitter -> first bounce. Pro first serves average ~45 m/s over the flight, rally
+# shots far less; above these the hit/bounce timing is wrong, not the player fast.
+SPEED_CAP_KMH = {"serve": 190.0, "rally": 150.0}
+
+
+def contact_frame(h, side, ball_px, fps, radius_s=0.2):
+    """Racket contact refined on the ball track: the image turn-around of the ball nearest the detected hit.
+    Camera behind the near baseline: a ball hit by the far player turns from moving up to moving down in the
+    image (local minimum of y); hit by the near player, from moving down to up (local maximum). Falls back
+    to the detected frame when the track has no clear turn-around."""
+    r = max(2, int(round(radius_s * fps)))
+    idx = [g for g in range(max(1, h - r), min(len(ball_px) - 1, h + r + 1))
+           if np.isfinite(ball_px[g - 1]).all() and np.isfinite(ball_px[g]).all() and np.isfinite(ball_px[g + 1]).all()]
+    best = None
+    for g in idx:
+        y0, y1, y2 = ball_px[g - 1][1], ball_px[g][1], ball_px[g + 1][1]
+        turn = (y1 <= y0 and y1 <= y2) if side == "far" else (y1 >= y0 and y1 >= y2) if side == "near" else False
+        if turn and (best is None or abs(g - h) < abs(best - h)):
+            best = g
+    return best if best is not None else h
 
 
 def drop_repeat_hits(shots, fps, window_s=1.5):
@@ -556,7 +583,8 @@ def run_rally(ball, frames, ident, tracks, seed, cal, model_path, out_path, name
     H_court, H_img = court.court_from_image(cal), court.image_from_court(cal)
     raw = np.array([[f[0], f[1]] if f else [np.nan, np.nan] for f in ball["frames"]], float)
     cleaned, static = rally.suppress_static(raw, fps)
-    _, _, prob, ball_px = detect_events(ball, model_path, ball_px=cleaned)
+    bridged, gaps = rally.bridge_gaps(cleaned, fps) if os.environ.get("LT_BRIDGE", "1") == "1" else (cleaned, [])
+    _, _, prob, ball_px = detect_events(ball, model_path, ball_px=bridged)
     R = rally.run(prob, ball_px, frames, ident, fps, H_img, H_court)
     hits = [h for h, _, _ in R["hits"]]
     attribution = {h: (pid, side, next((c["sides"][side][2] for c in R["candidates"] if c["t"] == h and c["type"] == "hit"), None))
@@ -578,7 +606,7 @@ def run_rally(ball, frames, ident, tracks, seed, cal, model_path, out_path, name
         "identity": {"seedFrame": seed["seedFrame"], "tracklets": len(tracks),
                      "framesWithA": sum(1 for f in ident if "A" in f), "framesWithB": sum(1 for f in ident if "B" in f)},
         "events": {"hits": hits, "bounces": bounces, "deadBall": R["dead"], "rejected": R["false"],
-                   "staticBallFrames": len(static), "ballHandlingRemoved": {"deadBall": R["dead"]}},
+                   "staticBallFrames": len(static), "bridgedGaps": len(gaps), "ballHandlingRemoved": {"deadBall": R["dead"]}},
         "points": [{"start": a, "end": b, "endReason": why} for a, b, why in R["points"]],
         "shots": shots,
         "perFrameIdentity": [{k: {"det": v["det"], "side": v["side"]} for k, v in f.items()} for f in ident],

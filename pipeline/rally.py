@@ -105,6 +105,64 @@ def suppress_static(ball_px, fps, max_step_px=4.0, min_len=12, min_span_s=0.6, m
     return out, sorted(removed)
 
 
+def bridge_gaps(ball_px, fps, max_gap_s=0.6, side_pts=6, fit_rms=4.0):
+    """Fill tracker gaps (ball hidden behind a player, the net band, or lost against the background) with
+    the ball's physical flight: a quadratic-in-time arc is fitted to the observations just before and just
+    after the gap; if the two arcs meet inside the gap (the bounce or contact the tracker missed), the gap
+    is filled along them -- before-arc up to the meeting frame, after-arc from there. Gaps without a
+    consistent meeting are left empty. Returns (filled track, list of (gap_start, gap_end, meet_frame))."""
+    xy = np.array(ball_px, float)
+    n = len(xy)
+    fin = np.isfinite(xy).all(1)
+    out = xy.copy()
+    done = []
+    max_gap = int(round(max_gap_s * fps))
+    f = 0
+    while f < n:
+        if fin[f]:
+            f += 1
+            continue
+        a = f
+        while f < n and not fin[f]:
+            f += 1
+        b = f                                   # gap = [a, b)
+        g = b - a
+        if a == 0 or b >= n or g < 3 or g > max_gap:   # shorter gaps: linear interpolation is fine
+            continue
+        before = [k for k in range(a - 1, max(-1, a - 1 - 3 * side_pts), -1) if fin[k]][:side_pts][::-1]
+        after = [k for k in range(b, min(n, b + 3 * side_pts)) if fin[k]][:side_pts]
+        if len(before) < 4 or len(after) < 4 or a - before[0] > 2.5 * side_pts or after[-1] - b > 2.5 * side_pts:
+            continue
+
+        def fit(idx):
+            t = np.array(idx, float)
+            cy = np.polyfit(t, xy[idx, 1], 2); cx = np.polyfit(t, xy[idx, 0], 1)
+            r = np.sqrt(np.mean((np.polyval(cy, t) - xy[idx, 1]) ** 2 + (np.polyval(cx, t) - xy[idx, 0]) ** 2))
+            return cx, cy, r
+        cxb, cyb, rb = fit(before)
+        cxa, cya, ra = fit(after)
+        if rb > fit_rms or ra > fit_rms:
+            continue
+        ts = np.arange(a - 0.5, b + 0.01, 0.25)
+        d = np.hypot(np.polyval(cxb, ts) - np.polyval(cxa, ts), np.polyval(cyb, ts) - np.polyval(cya, ts))
+        k = int(np.argmin(d))
+        step = max(np.hypot(*(xy[before[-1]] - xy[before[-2]])), np.hypot(*(xy[after[1]] - xy[after[0]])))
+        if d[k] > max(12.0, 1.5 * step):
+            continue
+        tm = ts[k]
+        if not (a + 0.5 <= tm <= b - 1.5):              # the hidden turn must lie inside the gap
+            continue
+        # only a hidden ground contact (or near-player contact): the ball moves down the image into the gap
+        # and back up out of it; apexes and other shapes need no bridging
+        if not (np.polyval(np.polyder(cyb), tm) > 0.5 and np.polyval(np.polyder(cya), tm) < -0.5):
+            continue
+        for j in range(a, b):
+            cx, cy = (cxb, cyb) if j < tm else (cxa, cya)
+            out[j] = [np.polyval(cx, j), np.polyval(cy, j)]
+        done.append((a, b, int(round(tm))))
+    return out, done
+
+
 def toss_serves(ball_px, fps, min_rise=60.0):
     """Serve contacts the tracker cannot see: the ball rises almost vertically (a toss, >= min_rise px),
     then is lost -- above the top of the frame or against the dark background -- and reappears within
