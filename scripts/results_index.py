@@ -37,12 +37,13 @@ def card(d):
         if tot:
             timing = f"<p class=small>Processing on the Mac: {tot / 60:.0f} min for {dur / 60:.0f} min of video.</p>"
     v = vids[0].name if vids else None
+    orig = next(iter(sorted(d.glob("*_ORIGINAL.mp4"))), None)
     return f"""<div class=card><h2>{html.escape(d.name.replace('_', ' '))}</h2>
 <p>{html.escape(DESCRIPTIONS.get(d.name, ''))}</p>
 <p><b>{len(rep.get('points', []))}</b> points · <b>{len(rep['shots'])}</b> shots · <b>{len(rep['events']['bounces'])}</b> bounces · {dur / 60:.1f} min</p>
 <table><tr><th>Player</th><th>Shots</th><th>FH</th><th>BH</th><th>Serve</th><th>Median km/h</th></tr>{rows}</table>
 {timing}
-<p>{f'<a href="{d.name}/{v}">▶ Annotated video</a> · ' if v else ''}<a href="{d.name}/analysis.html">Analysis page</a> · <a href="{d.name}/shots.csv">Shots (CSV)</a></p></div>"""
+<p>{f'<a href="{d.name}/{v}">▶ Annotated video</a> · ' if v else ''}{f'<a href="{d.name}/{orig.name}">Original video</a> · ' if orig else ''}<a href="{d.name}/analysis.html">Analysis page</a> · <a href="{d.name}/shots.csv">Shots (CSV)</a></p></div>"""
 
 
 def main():
